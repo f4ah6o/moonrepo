@@ -23,18 +23,24 @@ MoonBit の dependency を複数リポジトリに対して一括で更新・運
 
 リポジトリ名`*.mbt`をリストアップします。初期状態は全てコメントアウトしています。
 ```sh
-just repos-init <owner>
+just init <owner>
 ```
 
-2. `repository.ini` の `#` コメントを外して有効化
+2. `repository.ini` の `#` / `;` コメントを外して有効化
 
-3. clone + pull
+3. clone（初回）
 
 ```sh
-just repos-sync
+just clone
 ```
 
-4. 依存更新
+4. pull（既存リポジトリの更新）
+
+```sh
+just pull
+```
+
+5. 依存更新
 
 ```sh
 just deps-apply-all
