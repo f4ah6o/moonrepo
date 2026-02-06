@@ -29,7 +29,7 @@ clone:
     mkdir -p "{{REPOS_DIR}}"; \
     if [[ ! -f "{{REPO_LIST}}" ]]; then echo "missing {{REPO_LIST}}"; exit 1; fi; \
     while IFS= read -r repo; do \
-      [[ -z "$repo" || "$repo" =~ ^# ]] && continue; \
+      [[ -z "$repo" || "$repo" =~ ^# || "$repo" =~ ^\; ]] && continue; \
       name="${repo##*/}"; \
       dest="{{REPOS_DIR}}/$name"; \
       if [[ -d "$dest/.git" ]]; then echo "skip (exists): $repo -> $dest"; continue; fi; \
@@ -49,6 +49,18 @@ pull:
 
 # Clone missing repos, then pull updates
 sync: clone pull
+
+# Set git author config for all repos under ./repos
+config-all name email:
+  @bash -ceu 'set -euo pipefail; \
+    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
+    shopt -s nullglob; \
+    for dir in "{{REPOS_DIR}}"/*; do \
+      [[ -d "$dir/.git" ]] || continue; \
+      git -C "$dir" config user.name "{{name}}"; \
+      git -C "$dir" config user.email "{{email}}"; \
+      echo "configured: $dir"; \
+    done'
 
 # Scan dependencies for all repos
 # Example: just deps-scan-all --json
@@ -170,7 +182,7 @@ check:
   just moon-check-all
 
 test:
-  just deps-apply-all --dry-run
+  just moon-test-all
 
 build:
   @echo "build: nothing to build for this repo"
