@@ -6,18 +6,18 @@ REPOS_DIR := "repos"
 # Initialize repository.ini from gh repo list
 # Example: just init moonbitlang
 init owner:
+  just moonbit-skills
   @bash -ceu 'set -euo pipefail; \
     tmp="$(mktemp)"; \
     gh repo list "{{owner}}" --json name -L 1000 --jq ".[] | select(.name | contains(\".mbt\")) | .name" > "$tmp"; \
     { \
-      echo "# <owner>/<repo> を1行ずつ書く（空行と # 行は無視）"; \
-      echo "# 生成コマンド: just init {{owner}}"; \
-      echo "# 初期生成時はすべてコメントアウトされるので、必要なものだけ有効化する"; \
-      echo "# 例:"; \
-      echo "# {{owner}}/core"; \
+      echo "; <owner>/<repo> を1行ずつ書く（空行と ; 行は無視）"; \
+      echo "; 生成コマンド: just init {{owner}}"; \
+      echo "; 初期生成時はすべてコメントアウトされるので、必要なものだけ有効化する"; \
+      echo "; 例:"; \
       while IFS= read -r name; do \
         [[ -z "$name" ]] && continue; \
-        echo "# {{owner}}/$name"; \
+        echo "; {{owner}}/$name"; \
       done < "$tmp"; \
     } > "{{REPO_LIST}}"; \
     rm -f "$tmp"; \
@@ -36,6 +36,21 @@ clone:
       gh repo clone "$repo" "$dest"; \
     done < "{{REPO_LIST}}"'
 
+cclone: clean clone
+check-all: fmt check test
+
+moonbit-skills:
+  rm -rf .agents/skills/moonbit-agent-guide
+  rm -rf .agents/skills/moonbit-refactoring
+  gh repo clone moonbitlang/moonbit-agent-guide .agents/skills/moonbit
+  mv .agents/skills/moonbit/moonbit-agent-guide .agents/skills/
+  mv .agents/skills/moonbit/moonbit-refactoring .agents/skills/
+  rm -rf .agents/skills/moonbit
+
+clean:
+  rm -rf repos
+  mkdir -p repos
+
 # Pull updates for already cloned repos
 pull:
   @bash -ceu 'set -euo pipefail; \
@@ -47,11 +62,30 @@ pull:
       git -C "$dir" pull --ff-only; \
     done'
 
-# Clone missing repos, then pull updates
-sync: clone pull
+# Push current branch for all repos
+push-all:
+  @bash -ceu 'set -euo pipefail; \
+    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
+    shopt -s nullglob; \
+    for dir in "{{REPOS_DIR}}"/*; do \
+      [[ -d "$dir/.git" ]] || continue; \
+      echo "push: $dir"; \
+      git -C "$dir" push; \
+    done'
+
+# Show git status for all repos
+status-all:
+  @bash -ceu 'set -euo pipefail; \
+    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
+    shopt -s nullglob; \
+    for dir in "{{REPOS_DIR}}"/*; do \
+      [[ -d "$dir/.git" ]] || continue; \
+      echo "status: $dir"; \
+      git -C "$dir" status -sb; \
+    done'
 
 # Set git author config for all repos under ./repos
-config-all name email:
+config name email:
   @bash -ceu 'set -euo pipefail; \
     if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
     shopt -s nullglob; \
@@ -175,14 +209,13 @@ moon-test repo:
   moon -C "{{REPOS_DIR}}/{{repo}}" test
 
 # Standard CI entrypoints for this repo
-apply:
-  just deps-apply-all
+apply: deps-apply-all
 
-check:
-  just moon-check-all
+fmt: moon-fmt-all
 
-test:
-  just moon-test-all
+check: moon-check-all
+
+test: moon-test-all
 
 build:
   @echo "build: nothing to build for this repo"

@@ -1,5 +1,5 @@
-# <owner>/<repo> を1行ずつ書く（空行と # 行は無視）
-# 生成コマンド: just repos-init <owner>
-# 初期生成時はすべてコメントアウトされるので、必要なものだけ有効化する
-# 例:
-# moonbitlang/core
+; <owner>/<repo> を1行ずつ書く（空行と ; 行は無視）
+; 生成コマンド: just repos-init <owner>
+; 初期生成時はすべてコメントアウトされるので、必要なものだけ有効化する
+; 例:
+; moonbitlang/core

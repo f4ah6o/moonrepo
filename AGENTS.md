@@ -31,6 +31,6 @@ moonbitのdependencyを一括しておこなうrepository
 
 ## 
 
-## Development Guide
+## Development Guide(MUST READ)
 
-see also @docs/DEVELOPMENT_GUIDE.md 
+- `docs/DEVELOPMENT_GUIDE.md` を必ず読んでから作業すること。
