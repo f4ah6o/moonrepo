@@ -73,17 +73,6 @@ push-all:
       git -C "$dir" push; \
     done'
 
-# Show git status for all repos
-status-all:
-  @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -d "$dir/.git" ]] || continue; \
-      echo "status: $dir"; \
-      git -C "$dir" status -sb; \
-    done'
-
 # Set git author config for all repos under ./repos
 config name email:
   @bash -ceu 'set -euo pipefail; \
@@ -219,3 +208,14 @@ test: moon-test-all
 
 build:
   @echo "build: nothing to build for this repo"
+
+# Show git status for all repos
+status-all:
+  @bash -ceu 'set -euo pipefail; \
+    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
+    shopt -s nullglob; \
+    for dir in "{{REPOS_DIR}}"/*; do \
+      [[ -d "$dir/.git" ]] || continue; \
+      echo "status: $dir"; \
+      git -C "$dir" status -sb; \
+    done'
