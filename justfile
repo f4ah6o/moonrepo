@@ -219,3 +219,61 @@ status-all:
       echo "status: $dir"; \
       git -C "$dir" status -sb; \
     done'
+
+# Show latest GitHub Actions run result for all repos
+gh-runs-last-all:
+  @bash -ceu 'set -euo pipefail; \
+    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
+    shopt -s nullglob; \
+    printf "%-40s | %-24s | %-10s | %-10s | %s\n" "repo" "workflow" "status" "conclusion" "url"; \
+    printf "%-40s-+-%-24s-+-%-10s-+-%-10s-+-%s\n" "----------------------------------------" "------------------------" "----------" "----------" "------------------------------"; \
+    for dir in "{{REPOS_DIR}}"/*; do \
+      [[ -d "$dir/.git" ]] || continue; \
+      remote_url="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"; \
+      if [[ -z "$remote_url" ]]; then \
+        printf "%-40s | %-24s | %-10s | %-10s | %s\n" "$(basename "$dir")" "-" "error" "-" "missing origin"; \
+        continue; \
+      fi; \
+      repo="${remote_url#git@github.com:}"; \
+      repo="${repo#https://github.com/}"; \
+      repo="${repo#http://github.com/}"; \
+      repo="${repo%.git}"; \
+      if ! json="$(gh run list -R "$repo" -L 1 --json workflowName,status,conclusion,url 2>/dev/null)"; then \
+        printf "%-40s | %-24s | %-10s | %-10s | %s\n" "$repo" "-" "error" "-" "gh run list failed"; \
+        continue; \
+      fi; \
+      line="$(jq -r '\''if length == 0 then "-\tno-run\t-\t-" else .[0] | [(.workflowName // "-"), (.status // "-"), (.conclusion // "-"), (.url // "-")] | @tsv end'\'' <<< "$json")"; \
+      IFS=$'\''\t'\'' read -r workflow status conclusion url <<< "$line"; \
+      printf "%-40s | %-24s | %-10s | %-10s | %s\n" "$repo" "$workflow" "$status" "$conclusion" "$url"; \
+    done'
+
+# Re-run latest failed GitHub Actions run for all repos
+gh-runs-rerun-failed-all:
+  @bash -ceu 'set -euo pipefail; \
+    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
+    shopt -s nullglob; \
+    for dir in "{{REPOS_DIR}}"/*; do \
+      [[ -d "$dir/.git" ]] || continue; \
+      remote_url="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"; \
+      [[ -n "$remote_url" ]] || continue; \
+      repo="${remote_url#git@github.com:}"; \
+      repo="${repo#https://github.com/}"; \
+      repo="${repo#http://github.com/}"; \
+      repo="${repo%.git}"; \
+      if ! json="$(gh run list -R "$repo" -L 1 --json databaseId,conclusion,workflowName,url 2>/dev/null)"; then \
+        echo "skip: $repo (gh run list failed)"; \
+        continue; \
+      fi; \
+      line="$(jq -r '\''if length == 0 then "" else .[0] | [(.databaseId|tostring), (.conclusion // "-"), (.workflowName // "-"), (.url // "-")] | @tsv end'\'' <<< "$json")"; \
+      [[ -n "$line" ]] || continue; \
+      IFS=$'\''\t'\'' read -r run_id conclusion workflow url <<< "$line"; \
+      if [[ "$conclusion" != "failure" ]]; then \
+        continue; \
+      fi; \
+      echo "rerun: $repo | $workflow | $run_id"; \
+      if gh run rerun "$run_id" -R "$repo" >/dev/null 2>&1; then \
+        echo "ok: $repo | $url"; \
+      else \
+        echo "failed: $repo | $run_id"; \
+      fi; \
+    done'
