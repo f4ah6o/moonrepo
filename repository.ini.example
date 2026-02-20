@@ -1,5 +1,6 @@
 ; <owner>/<repo> を1行ずつ書く（空行と ; 行は無視）
-; 生成コマンド: just repos-init <owner>
+; 生成コマンド: just init <owner> --topics moonbit rust
+; --topics 未指定時は moonbit rust を使う
 ; 初期生成時はすべてコメントアウトされるので、必要なものだけ有効化する
 ; 例:
 ; moonbitlang/core

@@ -3,25 +3,77 @@ set shell := ["bash", "-cu"]
 REPO_LIST := "repository.ini"
 REPOS_DIR := "repos"
 
-# Initialize repository.ini from gh repo list
-# Example: just init moonbitlang
-init owner:
+# Initialize repository.ini from GitHub repository topics
+# Example: just init f4ah6o --topics moonbit rust
+init owner *args:
   just moonbit-skills
   @bash -ceu 'set -euo pipefail; \
+    owner="$1"; \
+    shift; \
+    topics=""; \
+    saw_topics=0; \
+    while (($# > 0)); do \
+      case "$1" in \
+        --topics) \
+          saw_topics=1; \
+          shift; \
+          while (($# > 0)); do \
+            case "$1" in \
+              --*) break ;; \
+              *) topics="$topics $1"; shift ;; \
+            esac; \
+          done; \
+          ;; \
+        --*) \
+          echo "unknown option: $1" >&2; \
+          exit 1; \
+          ;; \
+        *) \
+          echo "unexpected argument: $1 (use --topics <topic...>)" >&2; \
+          exit 1; \
+          ;; \
+      esac; \
+    done; \
+    if [[ "$saw_topics" -eq 0 ]]; then \
+      topics="moonbit rust"; \
+    fi; \
+    topics="$(printf "%s\n" $topics | tr "[:upper:]" "[:lower:]" | awk "NF" | sort -u | tr "\n" " " | sed -e "s/[[:space:]]*$//")"; \
+    if [[ -z "$topics" ]]; then \
+      echo "--topics requires at least one topic" >&2; \
+      exit 1; \
+    fi; \
     tmp="$(mktemp)"; \
-    gh repo list "{{owner}}" --json name -L 1000 --jq ".[] | select(.name | contains(\".mbt\")) | .name" > "$tmp"; \
+    gh repo list "$owner" --json name -L 1000 --jq ".[] | .name" | while IFS= read -r name; do \
+      [[ -z "$name" ]] && continue; \
+      if ! repo_topics="$(gh api "repos/$owner/$name/topics" -H "Accept: application/vnd.github+json" --jq ".names[]?" 2>/dev/null)"; then \
+        echo "warn: cannot fetch topics for $owner/$name" >&2; \
+        continue; \
+      fi; \
+      repo_topics="$(printf "%s\n" "$repo_topics" | tr "[:upper:]" "[:lower:]")"; \
+      matched=0; \
+      for wanted in $topics; do \
+        if printf "%s\n" "$repo_topics" | grep -Fxq "$wanted"; then \
+          matched=1; \
+          break; \
+        fi; \
+      done; \
+      if [[ "$matched" -eq 1 ]]; then \
+        echo "$name"; \
+      fi; \
+    done | sort -u > "$tmp"; \
     { \
       echo "; <owner>/<repo> を1行ずつ書く（空行と ; 行は無視）"; \
-      echo "; 生成コマンド: just init {{owner}}"; \
+      echo "; 生成コマンド: just init $owner --topics $topics"; \
       echo "; 初期生成時はすべてコメントアウトされるので、必要なものだけ有効化する"; \
+      echo "; topic に一致した repo をコメントアウトで出力する"; \
       echo "; 例:"; \
       while IFS= read -r name; do \
         [[ -z "$name" ]] && continue; \
-        echo "; {{owner}}/$name"; \
+        echo "; $owner/$name"; \
       done < "$tmp"; \
     } > "{{REPO_LIST}}"; \
     rm -f "$tmp"; \
-    echo "generated {{REPO_LIST}} from {{owner}}"'
+    echo "generated {{REPO_LIST}} from $owner (topics: $topics)"' -- "{{owner}}" {{args}}
 
 # Clone repos from repository.ini into ./repos
 clone:
@@ -84,6 +136,156 @@ config name email:
       git -C "$dir" config user.email "{{email}}"; \
       echo "configured: $dir"; \
     done'
+
+# Add moonbit topic to repos discoverable by current .mbt naming rule
+# Example: just topics-migrate-moonbit
+# Example: just topics-migrate-moonbit --apply
+topics-migrate-moonbit *args:
+  @bash -ceu 'set -euo pipefail; \
+    apply=0; \
+    for arg in "$@"; do \
+      case "$arg" in \
+        --apply) apply=1 ;; \
+        *) echo "unknown option: $arg" >&2; exit 1 ;; \
+      esac; \
+    done; \
+    topic="moonbit"; \
+    planned=0; \
+    updated=0; \
+    unchanged=0; \
+    failed=0; \
+    upsert_topic() { \
+      local repo="$1"; \
+      local existing; \
+      local merged; \
+      local t; \
+      local cmd; \
+      if ! existing="$(gh api "repos/$repo/topics" -H "Accept: application/vnd.github+json" --jq ".names[]?" 2>/dev/null)"; then \
+        echo "failed: $repo (cannot fetch topics)" >&2; \
+        failed=$((failed + 1)); \
+        return; \
+      fi; \
+      existing="$(printf "%s\n" "$existing" | tr "[:upper:]" "[:lower:]" | awk "NF" | sort -u)"; \
+      if printf "%s\n" "$existing" | grep -Fxq "$topic"; then \
+        echo "unchanged: $repo"; \
+        unchanged=$((unchanged + 1)); \
+        return; \
+      fi; \
+      planned=$((planned + 1)); \
+      if [[ "$apply" -eq 0 ]]; then \
+        echo "would add topic \"$topic\": $repo"; \
+        return; \
+      fi; \
+      merged="$( { printf "%s\n" "$existing"; printf "%s\n" "$topic"; } | awk "NF" | sort -u )"; \
+      cmd=(gh api -X PUT "repos/$repo/topics" -H "Accept: application/vnd.github+json"); \
+      while IFS= read -r t; do \
+        [[ -z "$t" ]] && continue; \
+        cmd+=(-f "names[]=$t"); \
+      done <<< "$merged"; \
+      if "${cmd[@]}" >/dev/null 2>&1; then \
+        echo "updated: $repo"; \
+        updated=$((updated + 1)); \
+      else \
+        echo "failed: $repo (cannot update topics)" >&2; \
+        failed=$((failed + 1)); \
+      fi; \
+    }; \
+    for owner in f4ah6o horideicom; do \
+      while IFS= read -r name; do \
+        [[ -z "$name" ]] && continue; \
+        upsert_topic "$owner/$name"; \
+      done < <(gh repo list "$owner" --json name -L 1000 --jq ".[] | select(.name | contains(\".mbt\")) | .name"); \
+    done; \
+    mode="dry-run"; \
+    if [[ "$apply" -eq 1 ]]; then mode="apply"; fi; \
+    echo "mode: $mode"; \
+    echo "planned: $planned"; \
+    echo "updated: $updated"; \
+    echo "unchanged: $unchanged"; \
+    echo "failed: $failed"; \
+    [[ "$failed" -eq 0 ]]' -- {{args}}
+
+# Add a topic to repos listed in repository.ini (active lines only)
+# Example: just topics-add-from-ini rust
+# Example: just topics-add-from-ini rust --apply
+topics-add-from-ini topic *args:
+  @bash -ceu 'set -euo pipefail; \
+    topic="$1"; \
+    shift; \
+    apply=0; \
+    for arg in "$@"; do \
+      case "$arg" in \
+        --apply) apply=1 ;; \
+        *) echo "unknown option: $arg" >&2; exit 1 ;; \
+      esac; \
+    done; \
+    topic="$(printf "%s" "$topic" | tr "[:upper:]" "[:lower:]")"; \
+    if [[ -z "$topic" ]]; then \
+      echo "topic must not be empty" >&2; \
+      exit 1; \
+    fi; \
+    if [[ ! -f "{{REPO_LIST}}" ]]; then \
+      echo "missing {{REPO_LIST}}" >&2; \
+      exit 1; \
+    fi; \
+    planned=0; \
+    updated=0; \
+    unchanged=0; \
+    failed=0; \
+    upsert_topic() { \
+      local repo="$1"; \
+      local existing; \
+      local merged; \
+      local t; \
+      local cmd; \
+      if ! existing="$(gh api "repos/$repo/topics" -H "Accept: application/vnd.github+json" --jq ".names[]?" 2>/dev/null)"; then \
+        echo "failed: $repo (cannot fetch topics)" >&2; \
+        failed=$((failed + 1)); \
+        return; \
+      fi; \
+      existing="$(printf "%s\n" "$existing" | tr "[:upper:]" "[:lower:]" | awk "NF" | sort -u)"; \
+      if printf "%s\n" "$existing" | grep -Fxq "$topic"; then \
+        echo "unchanged: $repo"; \
+        unchanged=$((unchanged + 1)); \
+        return; \
+      fi; \
+      planned=$((planned + 1)); \
+      if [[ "$apply" -eq 0 ]]; then \
+        echo "would add topic \"$topic\": $repo"; \
+        return; \
+      fi; \
+      merged="$( { printf "%s\n" "$existing"; printf "%s\n" "$topic"; } | awk "NF" | sort -u )"; \
+      cmd=(gh api -X PUT "repos/$repo/topics" -H "Accept: application/vnd.github+json"); \
+      while IFS= read -r t; do \
+        [[ -z "$t" ]] && continue; \
+        cmd+=(-f "names[]=$t"); \
+      done <<< "$merged"; \
+      if "${cmd[@]}" >/dev/null 2>&1; then \
+        echo "updated: $repo"; \
+        updated=$((updated + 1)); \
+      else \
+        echo "failed: $repo (cannot update topics)" >&2; \
+        failed=$((failed + 1)); \
+      fi; \
+    }; \
+    while IFS= read -r raw || [[ -n "$raw" ]]; do \
+      line="$(printf "%s" "$raw" | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$//")"; \
+      [[ -z "$line" || "$line" =~ ^# || "$line" =~ ^\; ]] && continue; \
+      if ! printf "%s\n" "$line" | grep -Eq "^[^/[:space:]]+/[^/[:space:]]+$"; then \
+        echo "skip invalid line: $line" >&2; \
+        failed=$((failed + 1)); \
+        continue; \
+      fi; \
+      upsert_topic "$line"; \
+    done < "{{REPO_LIST}}"; \
+    mode="dry-run"; \
+    if [[ "$apply" -eq 1 ]]; then mode="apply"; fi; \
+    echo "mode: $mode"; \
+    echo "planned: $planned"; \
+    echo "updated: $updated"; \
+    echo "unchanged: $unchanged"; \
+    echo "failed: $failed"; \
+    [[ "$failed" -eq 0 ]]' -- "{{topic}}" {{args}}
 
 # Scan dependencies for all repos
 # Example: just deps-scan-all --json

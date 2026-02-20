@@ -16,11 +16,14 @@ moonbitのdependencyを一括しておこなうrepository
 
 ## Workflow
 
-* `just repos-init <owner>` で `repository.ini` を初期生成（`.mbt` を含む repo 名だけ対象、コメントアウトで出力）
+* `just init <owner> --topics moonbit rust` で `repository.ini` を初期生成（topic 条件 OR、コメントアウトで出力）
+* `--topics` 未指定時は `moonbit rust` を使用
 * repository.ini に `<owner>/<repo>` を1行ずつ書く（空行と `#` 行は無視）
-* `just repos-clone` で `./repos` に clone
-* `just repos-pull` で既存 repos を更新
-* `just repos-sync` で clone と pull をまとめて実行
+* `just clone` で `./repos` に clone
+* `just pull` で既存 repos を更新
+* migration: `just topics-migrate-moonbit`（dry-run） / `just topics-migrate-moonbit --apply`
+* 任意topic追加: `just topics-add-from-ini <topic>`（dry-run） / `just topics-add-from-ini <topic> --apply`
+* moonrepo 管理対象 repo には `moonbit` / `rust` topic を設定する運用にする
 * `just deps-scan-all` で依存一覧を確認
 * `just deps-apply-all` で依存更新（例: `--dry-run`, `--no-justfile`）
 * 個別実行は `just deps-scan <repo>` / `just deps-apply <repo>`
