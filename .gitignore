@@ -2,3 +2,4 @@ repos/
 skills/
 
 repository.ini
+.playwright-cli/
