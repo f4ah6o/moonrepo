@@ -25,6 +25,11 @@ monorepo ではありません。
 
 - monorepo 化しない
 
+## Release Rule
+
+- `repos/aci-rs` のバージョンは CalVer `YYYY.M.Patch` を使う（例: `2026.3.0`）。
+- `repos/aci-rs` の release tag は `v<version>` 形式（例: `v2026.3.0`）。
+
 ## 標準ワークフロー
 
 1. `just init <owner> --topics moonbit rust` で `repository.ini` を初期生成
