@@ -2,11 +2,12 @@ set shell := ["bash", "-cu"]
 
 REPO_LIST := "repository.ini"
 REPOS_DIR := "repos"
+REPO_SCOPE := "active"
+FORCE := "0"
 
 # Initialize repository.ini from GitHub repository topics
 # Example: just init f4ah6o --topics moonbit rust
 init owner *args:
-  just moonbit-skills
   @bash -ceu 'set -euo pipefail; \
     owner="$1"; \
     shift; \
@@ -73,69 +74,176 @@ init owner *args:
       done < "$tmp"; \
     } > "{{REPO_LIST}}"; \
     rm -f "$tmp"; \
-    echo "generated {{REPO_LIST}} from $owner (topics: $topics)"' -- "{{owner}}" {{args}}
+      echo "generated {{REPO_LIST}} from $owner (topics: $topics)"' -- "{{owner}}" {{args}}
 
 # Clone repos from repository.ini into ./repos
 clone:
   @bash -ceu 'set -euo pipefail; \
     mkdir -p "{{REPOS_DIR}}"; \
     if [[ ! -f "{{REPO_LIST}}" ]]; then echo "missing {{REPO_LIST}}"; exit 1; fi; \
-    while IFS= read -r repo; do \
-      [[ -z "$repo" || "$repo" =~ ^# || "$repo" =~ ^\; ]] && continue; \
-      name="${repo##*/}"; \
-      dest="{{REPOS_DIR}}/$name"; \
+    while IFS=$'\''\t'\'' read -r repo name dest; do \
       if [[ -d "$dest/.git" ]]; then echo "skip (exists): $repo -> $dest"; continue; fi; \
       gh repo clone "$repo" "$dest"; \
-    done < "{{REPO_LIST}}"'
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh list active)'
 
 cclone: clean clone
 check-all: fmt check test
 
 moonbit-skills:
-  rm -rf .agents/skills/moonbit-agent-guide
-  rm -rf .agents/skills/moonbit-refactoring
-  gh repo clone moonbitlang/moonbit-agent-guide .agents/skills/moonbit
-  mv .agents/skills/moonbit/moonbit-agent-guide .agents/skills/
-  mv .agents/skills/moonbit/moonbit-refactoring .agents/skills/
-  rm -rf .agents/skills/moonbit
+  @echo "deprecated: use just skills-init"
 
 clean:
-  rm -rf repos
-  mkdir -p repos
+  @bash -ceu 'set -euo pipefail; \
+    if [[ "{{FORCE}}" != "1" ]]; then \
+      echo "refusing to remove {{REPOS_DIR}} without FORCE=1"; \
+      if [[ -d "{{REPOS_DIR}}" ]]; then \
+        find "{{REPOS_DIR}}" -mindepth 1 -maxdepth 1 -type d | sort || true; \
+      fi; \
+      exit 1; \
+    fi; \
+    rm -rf "{{REPOS_DIR}}"; \
+    mkdir -p "{{REPOS_DIR}}"'
+
+doctor:
+  @bash -ceu 'set -euo pipefail; \
+    missing=0; \
+    for cmd in gh just moon moon-dst jq; do \
+      if command -v "$cmd" >/dev/null 2>&1; then \
+        echo "ok command: $cmd"; \
+      else \
+        echo "missing command: $cmd" >&2; \
+        missing=$((missing + 1)); \
+      fi; \
+    done; \
+    if REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh validate; then \
+      echo "ok repository.ini"; \
+    else \
+      missing=$((missing + 1)); \
+    fi; \
+    active_missing=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ -d "$path/.git" ]]; then \
+        echo "ok active clone: $repo"; \
+      else \
+        echo "missing active clone: $repo -> $path" >&2; \
+        active_missing=$((active_missing + 1)); \
+      fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh list active); \
+    extra_cloned=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      [[ -n "$repo" ]] || continue; \
+      echo "extra cloned repo: $repo -> $path"; \
+      extra_cloned=$((extra_cloned + 1)); \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
+    for skill in .agents/skills/moonbit-agent-guide/SKILL.md .agents/skills/moonbit-refactoring/SKILL.md; do \
+      if [[ -f "$skill" ]]; then \
+        echo "ok skill: $skill"; \
+      else \
+        echo "missing skill: $skill" >&2; \
+        missing=$((missing + 1)); \
+      fi; \
+    done; \
+    echo "summary: missing=$missing active_missing=$active_missing extra_cloned=$extra_cloned"; \
+    [[ "$missing" -eq 0 && "$active_missing" -eq 0 ]]'
+
+repos-prune *args:
+  @bash -ceu 'set -euo pipefail; \
+    apply=0; \
+    source scripts/repo-lib.sh; \
+    for arg in "$@"; do \
+      case "$arg" in \
+        --apply) apply=1 ;; \
+        *) echo "unknown option: $arg" >&2; exit 1 ;; \
+      esac; \
+    done; \
+    count=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      [[ -n "$repo" ]] || continue; \
+      count=$((count + 1)); \
+      dirty=0; \
+      ahead=0; \
+      if [[ -d "$path/.git" ]]; then \
+        if repo_is_dirty "$path"; then dirty=1; fi; \
+        if [[ "$(repo_ahead_count "$path")" != "0" ]]; then ahead=1; fi; \
+      fi; \
+      echo "prune candidate: $repo -> $path (dirty=$dirty ahead=$ahead)"; \
+      if [[ "$apply" -eq 1 ]]; then \
+        if [[ "$dirty" -eq 1 || "$ahead" -eq 1 ]] && [[ "{{FORCE}}" != "1" ]]; then \
+          echo "skip protected prune: $repo"; \
+          continue; \
+        fi; \
+        rm -rf "$path"; \
+        echo "pruned: $repo"; \
+      fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
+    mode="dry-run"; \
+    if [[ "$apply" -eq 1 ]]; then mode="apply"; fi; \
+    echo "mode: $mode"; \
+    echo "planned: $count"' -- {{args}}
 
 # Pull updates for already cloned repos
 pull:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -d "$dir/.git" ]] || continue; \
-      echo "pull: $dir"; \
-      git -C "$dir" pull --ff-only; \
-    done'
+    source scripts/repo-lib.sh; \
+    ok=0; skipped_dirty=0; missing=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if repo_is_dirty "$path"; then \
+        echo "skip dirty: $repo"; \
+        skipped_dirty=$((skipped_dirty + 1)); \
+        continue; \
+      fi; \
+      echo "pull: $repo"; \
+      if git -C "$path" pull --ff-only; then \
+        ok=$((ok + 1)); \
+      else \
+        failed=$((failed + 1)); \
+      fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok skipped_dirty=$skipped_dirty missing=$missing failed=$failed"; \
+    [[ "$skipped_dirty" -eq 0 && "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
 # Push current branch for all repos
 push-all:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -d "$dir/.git" ]] || continue; \
-      echo "push: $dir"; \
-      git -C "$dir" push; \
-    done'
+    ok=0; missing=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      echo "push: $repo"; \
+      if git -C "$path" push; then \
+        ok=$((ok + 1)); \
+      else \
+        failed=$((failed + 1)); \
+      fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
 # Set git author config for all repos under ./repos
 config name email:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -d "$dir/.git" ]] || continue; \
-      git -C "$dir" config user.name "{{name}}"; \
-      git -C "$dir" config user.email "{{email}}"; \
-      echo "configured: $dir"; \
-    done'
+    ok=0; missing=0; \
+    while IFS=$'\''\t'\'' read -r repo target_name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      git -C "$path" config user.name "{{name}}"; \
+      git -C "$path" config user.email "{{email}}"; \
+      echo "configured: $repo"; \
+      ok=$((ok + 1)); \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok missing=$missing"; \
+    [[ "$missing" -eq 0 ]]'
 
 # Add moonbit topic to repos discoverable by current .mbt naming rule
 # Example: just topics-migrate-moonbit
@@ -292,20 +400,88 @@ topics-add-from-ini topic *args:
 # Example: just deps-scan-all --ignore tmp --ignore vendor
 
 deps-scan-all *args:
-  moon-dst scan --root "{{REPOS_DIR}}" {{args}}
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    missing=0; \
+    cmd=(moon-dst scan --root "{{REPOS_DIR}}"); \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+      fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    if [[ "{{REPO_SCOPE}}" == "active" ]]; then \
+      while IFS=$'\''\t'\'' read -r repo name path; do \
+        [[ -n "$name" ]] || continue; \
+        cmd+=(--ignore "$name"); \
+      done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
+    fi; \
+    if (($# > 0)); then cmd+=("$@"); fi; \
+    "${cmd[@]}"; \
+    [[ "$missing" -eq 0 ]]' -- {{args}}
 
 # Apply dependency updates for all repos
 # Example: just deps-apply-all --dry-run
 # Example: just deps-apply-all --no-justfile
 
 deps-apply-all *args:
-  moon-dst apply --root "{{REPOS_DIR}}" {{args}}
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    missing=0; skipped_dirty=0; \
+    cmd=(moon-dst apply --root "{{REPOS_DIR}}"); \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if repo_is_dirty "$path"; then \
+        echo "skip dirty: $repo"; \
+        cmd+=(--ignore "$name"); \
+        skipped_dirty=$((skipped_dirty + 1)); \
+      fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    if [[ "{{REPO_SCOPE}}" == "active" ]]; then \
+      while IFS=$'\''\t'\'' read -r repo name path; do \
+        [[ -n "$name" ]] || continue; \
+        cmd+=(--ignore "$name"); \
+      done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
+    fi; \
+    if (($# > 0)); then cmd+=("$@"); fi; \
+    "${cmd[@]}"; \
+    echo "summary: skipped_dirty=$skipped_dirty missing=$missing"; \
+    [[ "$skipped_dirty" -eq 0 && "$missing" -eq 0 ]]' -- {{args}}
 
 # Add justfile to all repos
 # Example: just deps-just-all --mode skip
 
 deps-just-all *args:
-  moon-dst just --root "{{REPOS_DIR}}" {{args}}
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    missing=0; skipped_dirty=0; \
+    cmd=(moon-dst just --root "{{REPOS_DIR}}"); \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if repo_is_dirty "$path"; then \
+        echo "skip dirty: $repo"; \
+        cmd+=(--ignore "$name"); \
+        skipped_dirty=$((skipped_dirty + 1)); \
+      fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    if [[ "{{REPO_SCOPE}}" == "active" ]]; then \
+      while IFS=$'\''\t'\'' read -r repo name path; do \
+        [[ -n "$name" ]] || continue; \
+        cmd+=(--ignore "$name"); \
+      done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
+    fi; \
+    if (($# > 0)); then cmd+=("$@"); fi; \
+    "${cmd[@]}"; \
+    echo "summary: skipped_dirty=$skipped_dirty missing=$missing"; \
+    [[ "$skipped_dirty" -eq 0 && "$missing" -eq 0 ]]' -- {{args}}
 
 # Scan dependencies for one repo under ./repos
 # Example: just deps-scan moonbit-lang-core
@@ -328,43 +504,87 @@ deps-just repo *args:
 # Run moon fmt/check/build/clean for all repos (turbo-like)
 moon-fmt-all:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -f "$dir/moon.mod.json" ]] || continue; \
-      echo "moon fmt: $dir"; \
-      moon -C "$dir" fmt; \
-    done'
+    source scripts/repo-lib.sh; \
+    ok=0; missing=0; skipped_not_moon=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if ! repo_is_moon "$path"; then \
+        echo "skip not moon: $repo"; \
+        skipped_not_moon=$((skipped_not_moon + 1)); \
+        continue; \
+      fi; \
+      echo "moon fmt: $repo"; \
+      if moon -C "$path" fmt; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
 moon-check-all:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -f "$dir/moon.mod.json" ]] || continue; \
-      echo "moon check: $dir"; \
-      moon -C "$dir" check; \
-    done'
+    source scripts/repo-lib.sh; \
+    ok=0; missing=0; skipped_not_moon=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if ! repo_is_moon "$path"; then \
+        echo "skip not moon: $repo"; \
+        skipped_not_moon=$((skipped_not_moon + 1)); \
+        continue; \
+      fi; \
+      echo "moon check: $repo"; \
+      if moon -C "$path" check; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
 moon-build-all:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -f "$dir/moon.mod.json" ]] || continue; \
-      echo "moon build: $dir"; \
-      moon -C "$dir" build; \
-    done'
+    source scripts/repo-lib.sh; \
+    ok=0; missing=0; skipped_not_moon=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if ! repo_is_moon "$path"; then \
+        echo "skip not moon: $repo"; \
+        skipped_not_moon=$((skipped_not_moon + 1)); \
+        continue; \
+      fi; \
+      echo "moon build: $repo"; \
+      if moon -C "$path" build; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
 moon-clean-all:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -f "$dir/moon.mod.json" ]] || continue; \
-      echo "moon clean: $dir"; \
-      moon -C "$dir" clean; \
-    done'
+    source scripts/repo-lib.sh; \
+    ok=0; missing=0; skipped_not_moon=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if ! repo_is_moon "$path"; then \
+        echo "skip not moon: $repo"; \
+        skipped_not_moon=$((skipped_not_moon + 1)); \
+        continue; \
+      fi; \
+      echo "moon clean: $repo"; \
+      if moon -C "$path" clean; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
 # Run moon fmt/check/build/clean for a single repo under ./repos
 moon-fmt repo:
@@ -382,13 +602,24 @@ moon-clean repo:
 # Run moon test for all repos (turbo-like)
 moon-test-all:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -f "$dir/moon.mod.json" ]] || continue; \
-      echo "moon test: $dir"; \
-      moon -C "$dir" test; \
-    done'
+    source scripts/repo-lib.sh; \
+    ok=0; missing=0; skipped_not_moon=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if ! repo_is_moon "$path"; then \
+        echo "skip not moon: $repo"; \
+        skipped_not_moon=$((skipped_not_moon + 1)); \
+        continue; \
+      fi; \
+      echo "moon test: $repo"; \
+      if moon -C "$path" test; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
 # skill
 skills-init:
@@ -414,56 +645,73 @@ build:
 # Show git status for all repos
 status-all:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -d "$dir/.git" ]] || continue; \
-      echo "status: $dir"; \
-      git -C "$dir" status -sb; \
-    done'
+    missing=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      echo "status: $repo"; \
+      git -C "$path" status -sb; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: missing=$missing"'
 
 # Show latest GitHub Actions run result for all repos
 gh-runs-last-all:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
+    source scripts/repo-lib.sh; \
+    missing=0; failed=0; \
     printf "%-40s | %-24s | %-10s | %-10s | %s\n" "repo" "workflow" "status" "conclusion" "url"; \
     printf "%-40s-+-%-24s-+-%-10s-+-%-10s-+-%s\n" "----------------------------------------" "------------------------" "----------" "----------" "------------------------------"; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -d "$dir/.git" ]] || continue; \
-      remote_url="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"; \
-      if [[ -z "$remote_url" ]]; then \
-        printf "%-40s | %-24s | %-10s | %-10s | %s\n" "$(basename "$dir")" "-" "error" "-" "missing origin"; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        printf "%-40s | %-24s | %-10s | %-10s | %s\n" "$repo" "-" "missing" "-" "$path"; \
+        missing=$((missing + 1)); \
         continue; \
       fi; \
-      repo="${remote_url#git@github.com:}"; \
-      repo="${repo#https://github.com/}"; \
-      repo="${repo#http://github.com/}"; \
-      repo="${repo%.git}"; \
+      if ! repo="$(repo_slug_from_path "$path")"; then \
+        printf "%-40s | %-24s | %-10s | %-10s | %s\n" "$name" "-" "error" "-" "missing origin"; \
+        failed=$((failed + 1)); \
+        continue; \
+      fi; \
       if ! json="$(gh run list -R "$repo" -L 1 --json workflowName,status,conclusion,url 2>/dev/null)"; then \
         printf "%-40s | %-24s | %-10s | %-10s | %s\n" "$repo" "-" "error" "-" "gh run list failed"; \
+        failed=$((failed + 1)); \
         continue; \
       fi; \
       line="$(jq -r '\''if length == 0 then "-\tno-run\t-\t-" else .[0] | [(.workflowName // "-"), (.status // "-"), (.conclusion // "-"), (.url // "-")] | @tsv end'\'' <<< "$json")"; \
       IFS=$'\''\t'\'' read -r workflow status conclusion url <<< "$line"; \
       printf "%-40s | %-24s | %-10s | %-10s | %s\n" "$repo" "$workflow" "$status" "$conclusion" "$url"; \
-    done'
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: missing=$missing failed=$failed"'
 
 # Re-run latest failed GitHub Actions run for all repos
-gh-runs-rerun-failed-all:
+gh-runs-rerun-failed-all *args:
   @bash -ceu 'set -euo pipefail; \
-    if [[ ! -d "{{REPOS_DIR}}" ]]; then echo "missing {{REPOS_DIR}}"; exit 1; fi; \
-    shopt -s nullglob; \
-    for dir in "{{REPOS_DIR}}"/*; do \
-      [[ -d "$dir/.git" ]] || continue; \
-      remote_url="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"; \
-      [[ -n "$remote_url" ]] || continue; \
-      repo="${remote_url#git@github.com:}"; \
-      repo="${repo#https://github.com/}"; \
-      repo="${repo#http://github.com/}"; \
-      repo="${repo%.git}"; \
+    source scripts/repo-lib.sh; \
+    apply=0; \
+    for arg in "$@"; do \
+      case "$arg" in \
+        --apply) apply=1 ;; \
+        *) echo "unknown option: $arg" >&2; exit 1 ;; \
+      esac; \
+    done; \
+    rerun=0; failed=0; missing=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -d "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if ! repo="$(repo_slug_from_path "$path")"; then \
+        echo "skip: $name (missing origin)"; \
+        failed=$((failed + 1)); \
+        continue; \
+      fi; \
       if ! json="$(gh run list -R "$repo" -L 1 --json databaseId,conclusion,workflowName,url 2>/dev/null)"; then \
         echo "skip: $repo (gh run list failed)"; \
+        failed=$((failed + 1)); \
         continue; \
       fi; \
       line="$(jq -r '\''if length == 0 then "" else .[0] | [(.databaseId|tostring), (.conclusion // "-"), (.workflowName // "-"), (.url // "-")] | @tsv end'\'' <<< "$json")"; \
@@ -472,10 +720,21 @@ gh-runs-rerun-failed-all:
       if [[ "$conclusion" != "failure" ]]; then \
         continue; \
       fi; \
+      if [[ "$apply" -eq 0 ]]; then \
+        echo "would rerun: $repo | $workflow | $run_id | $url"; \
+        rerun=$((rerun + 1)); \
+        continue; \
+      fi; \
       echo "rerun: $repo | $workflow | $run_id"; \
       if gh run rerun "$run_id" -R "$repo" >/dev/null 2>&1; then \
         echo "ok: $repo | $url"; \
+        rerun=$((rerun + 1)); \
       else \
         echo "failed: $repo | $run_id"; \
+        failed=$((failed + 1)); \
       fi; \
-    done'
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    mode="dry-run"; \
+    if [[ "$apply" -eq 1 ]]; then mode="apply"; fi; \
+    echo "summary: mode=$mode rerun=$rerun missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}

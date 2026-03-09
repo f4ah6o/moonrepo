@@ -14,8 +14,9 @@ monorepo ではありません。
   - `just`
   - `moon`
   - `moon-dst`
+  - `jq`
   - `skop`（skill 管理に使う）
-- skill の初期化（`justfile` の定義に合わせる）
+- skill の初期化は明示的に行う
   - `just skills-init`
 - 手動インストールする場合
   - `skop add moonbit-agent-guide@f4ah6o/skills-bonsai --target codex`
@@ -36,18 +37,21 @@ monorepo ではありません。
 2. `--topics` 未指定時は `moonbit rust` が使われる
 3. `repository.ini` の有効行に `<owner>/<repo>` を1行ずつ記載（空行と `#` / `;` 行は無視）
 4. `just clone` で `./repos` に clone
-5. `just pull` で既存 `repos/*` を更新
-6. topic migration
+5. `just doctor` で前提コマンド・`repository.ini`・clone 状態を確認
+6. `just pull` で既存 active repo を更新
+   - 全 clone を対象にしたい場合だけ `just --set REPO_SCOPE cloned pull`
+7. 余剰 clone の整理が必要なら `just repos-prune` / `just repos-prune --apply`
+8. topic migration
    - `just topics-migrate-moonbit`
    - `just topics-migrate-moonbit --apply`
-7. `repository.ini` 対象への topic 追加
+9. `repository.ini` 対象への topic 追加
    - `just topics-add-from-ini <topic>`
    - `just topics-add-from-ini <topic> --apply`
-8. 依存の確認と適用
+10. 依存の確認と適用
    - `just deps-scan-all`
    - `just deps-apply-all`
    - 個別: `just deps-scan <repo>` / `just deps-apply <repo>`
-9. `moon-dst just` 相当
+11. `moon-dst just` 相当
    - `just deps-just-all`
    - `just deps-just <repo>`
 
@@ -59,6 +63,8 @@ monorepo ではありません。
   - `just moon-build-all`
   - `just moon-clean-all`
   - `just moon-test-all`
+  - 既定対象は `repository.ini` の active repo
+  - 全 clone を対象にしたい場合は `just --set REPO_SCOPE cloned <recipe>`
 - 個別 repo
   - `just moon-fmt <repo>`
   - `just moon-check <repo>`
@@ -70,14 +76,5 @@ monorepo ではありません。
   - `just push-all`
   - `just gh-runs-last-all`
   - `just gh-runs-rerun-failed-all`
-
-## tornado 開発導線（repos 配下）
-
-`repos/<repo>` で tornado を使う導線を追加する場合は、ローカル skill のスクリプトを使う。
-
-- skill: `.agents/skills/tornado-repo-bootstrap`
-- 実行:
-  - `bash .agents/skills/tornado-repo-bootstrap/scripts/enable_tornado_repo.sh <repo_name>`
-- 追加される内容:
-  - `repos/<repo_name>/tornado.json`
-  - `repos/<repo_name>/justfile` に `tornado` / `tornado-validate` recipe
+  - failed workflow の rerun は dry-run 既定
+  - `repos/` 全削除は `just --set FORCE 1 clean` / `just --set FORCE 1 cclone`
