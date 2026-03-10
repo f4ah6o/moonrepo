@@ -1,5 +1,7 @@
 repos/
 skills/
+.DS_Store
+.claude/worktrees/
 
 repository.ini
 .playwright-cli/
