@@ -158,7 +158,7 @@ bump_workflows() {
 }
 
 list_target_names() {
-  gh repo list "$OWNER" --json name,repositoryTopics -L 1000 \
+  gh repo list "$OWNER" --no-archived --json name,repositoryTopics -L 1000 \
     --jq '.[] | select(.repositoryTopics[]?.name == "moonbit") | .name' | sort
 }
 

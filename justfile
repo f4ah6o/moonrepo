@@ -44,7 +44,7 @@ init owner *args:
       exit 1; \
     fi; \
     tmp="$(mktemp)"; \
-    gh repo list "$owner" --json name -L 1000 --jq ".[] | .name" | while IFS= read -r name; do \
+    gh repo list "$owner" --no-archived --json name -L 1000 --jq ".[] | .name" | while IFS= read -r name; do \
       [[ -z "$name" ]] && continue; \
       if ! repo_topics="$(gh api "repos/$owner/$name/topics" -H "Accept: application/vnd.github+json" --jq ".names[]?" 2>/dev/null)"; then \
         echo "warn: cannot fetch topics for $owner/$name" >&2; \
@@ -302,7 +302,7 @@ topics-migrate-moonbit *args:
       while IFS= read -r name; do \
         [[ -z "$name" ]] && continue; \
         upsert_topic "$owner/$name"; \
-      done < <(gh repo list "$owner" --json name -L 1000 --jq ".[] | select(.name | contains(\".mbt\")) | .name"); \
+      done < <(gh repo list "$owner" --no-archived --json name -L 1000 --jq ".[] | select(.name | contains(\".mbt\")) | .name"); \
     done; \
     mode="dry-run"; \
     if [[ "$apply" -eq 1 ]]; then mode="apply"; fi; \
