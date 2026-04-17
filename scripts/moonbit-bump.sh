@@ -51,7 +51,8 @@ workflow_install_lines() {
   for f in "$wfdir"/*.yml "$wfdir"/*.yaml; do
     [[ -f "$f" ]] || continue
     local rel="${f#$path/}"
-    grep -n "cli\.moonbitlang\.com/install/unix\.sh" "$f" 2>/dev/null | while IFS= read -r line; do
+    { grep -n "cli\.moonbitlang\.com/install/unix\.sh" "$f" 2>/dev/null || true; } | while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
       printf '  [%s] %s\n' "$rel" "$line"
     done
   done
