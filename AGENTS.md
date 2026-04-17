@@ -54,6 +54,13 @@ monorepo ではありません。
 11. `moon-dst just` 相当
    - `just deps-just-all`
    - `just deps-just <repo>`
+12. moonbit toolchain 本体の一括更新（`repository.ini` 非依存。`f4ah6o` + `moonbit` topic の全 repo が対象）
+   - `just moonbit-bump-scan`
+   - `just moonbit-bump <version>`
+   - `just moonbit-bump <version> --apply`
+   - `.tool-versions` と `.github/workflows/*.yml` の `cli.moonbitlang.com/install/unix.sh` 行だけを更新する
+   - `moonbitlang/*` deps は対象外（`just deps-apply-all` を別途実行）
+   - 未 clone の repo は warn のみでスキップ（自動 clone はしない）
 
 ## 一括実行コマンド
 

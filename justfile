@@ -621,6 +621,28 @@ moon-test-all:
     echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon missing=$missing failed=$failed"; \
     [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
+# Bump the moonbit toolchain version across all f4ah6o repos with the
+# "moonbit" GitHub topic. Touches .tool-versions and the install line in
+# .github/workflows/*.yml. Does NOT touch moon.mod.json deps — use
+# `just deps-apply-all` for that.
+# Example: just moonbit-bump 0.1.20260215
+# Example: just moonbit-bump 0.1.20260215 --apply
+moonbit-bump version *args:
+  @bash -ceu 'set -euo pipefail; \
+    apply=0; \
+    for arg in "$@"; do \
+      case "$arg" in \
+        --apply) apply=1 ;; \
+        *) echo "unknown option: $arg" >&2; exit 1 ;; \
+      esac; \
+    done; \
+    REPOS_DIR="{{REPOS_DIR}}" APPLY="$apply" VERSION="{{version}}" \
+      bash scripts/moonbit-bump.sh' -- {{args}}
+
+# Show the current moonbit toolchain version per target repo (read-only).
+moonbit-bump-scan:
+  @REPOS_DIR="{{REPOS_DIR}}" bash scripts/moonbit-bump.sh --scan-only
+
 # skill
 skills-init:
   skop add moonbit-agent-guide@f4ah6o/skills-bonsai --target codex

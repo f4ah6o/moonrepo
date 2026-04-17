@@ -95,6 +95,11 @@ just topics-add-from-ini rust --apply
 - `repository.ini` 対象に topic を追加（dry-run / apply）
   - `just topics-add-from-ini rust`
   - `just topics-add-from-ini rust --apply`
+- f4ah6o の `moonbit` topic 付き repo 全部の moonbit toolchain を一括更新
+  - `just moonbit-bump-scan`
+  - `just moonbit-bump 0.1.20260215`
+  - `just moonbit-bump 0.1.20260215 --apply`
+  - `.tool-versions` と `.github/workflows/*.yml` の install 行のみを更新します。`moonbitlang/*` deps の更新は `just deps-apply-all` を別途実行してください。
 - justfile 追加
   - `just deps-just-all`
 - moon 一括
