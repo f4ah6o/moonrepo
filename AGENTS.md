@@ -10,17 +10,19 @@ monorepo ではありません。
 ## 事前準備
 
 - 必須コマンド
-  - `gh`
+  - `gh`（`gh skill` 拡張を含む。skill 管理に使う）
   - `just`
   - `moon`
   - `moon-dst`
   - `jq`
-  - `skop`（skill 管理に使う）
 - skill の初期化は明示的に行う
   - `just skills-init`
-- 手動インストールする場合
-  - `skop add moonbit-agent-guide@f4ah6o/skills-bonsai --target codex`
-  - `skop add moonbit-refactoring@f4ah6o/skills-bonsai --target codex`
+- 参照する skill marketplace
+  - <https://github.com/moonbitlang/skills>
+  - <https://github.com/moonbitlang/moonbit-agent-guide>
+- 手動インストールする場合（codex 用）
+  - `gh skill install moonbitlang/moonbit-agent-guide moonbit-agent-guide --agent codex --scope user`
+  - `gh skill install moonbitlang/moonbit-agent-guide moonbit-refactoring --agent codex --scope user`
 
 ## しないこと
 
@@ -61,6 +63,11 @@ monorepo ではありません。
    - `.tool-versions` と `.github/workflows/*.yml` の `cli.moonbitlang.com/install/unix.sh` 行だけを更新する
    - `moonbitlang/*` deps は対象外（`just deps-apply-all` を別途実行）
    - 未 clone の repo は warn のみでスキップ（自動 clone はしない）
+13. MoonBit repo の refactoring（`moonbit-refactoring` skill 経由）
+   - 前提: `just skills-init` 済みで対象 repo が clean
+   - `just refactor <repo>` で環境検証と次手順の出力
+   - 出力に従って `refactor/<date>` ブランチを切り、codex/claude で skill を起動
+   - skill が指示する順序（architecture -> API 棚卸し -> 最小差分 -> tests/docs -> `moon check`/`moon test`）で進める
 
 ## 一括実行コマンド
 

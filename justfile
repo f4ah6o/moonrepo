@@ -135,7 +135,7 @@ doctor:
       echo "extra cloned repo: $repo -> $path"; \
       extra_cloned=$((extra_cloned + 1)); \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
-    for skill in .agents/skills/moonbit-agent-guide/SKILL.md .agents/skills/moonbit-refactoring/SKILL.md; do \
+    for skill in "$HOME/.codex/skills/moonbit-agent-guide/SKILL.md" "$HOME/.codex/skills/moonbit-refactoring/SKILL.md"; do \
       if [[ -f "$skill" ]]; then \
         echo "ok skill: $skill"; \
       else \
@@ -643,10 +643,59 @@ moonbit-bump version *args:
 moonbit-bump-scan:
   @REPOS_DIR="{{REPOS_DIR}}" bash scripts/moonbit-bump.sh --scan-only
 
-# skill
+# Install moonbit skills via `gh skill` (codex user scope)
+# Source: https://github.com/moonbitlang/moonbit-agent-guide
 skills-init:
-  skop add moonbit-agent-guide@f4ah6o/skills-bonsai --target codex
-  skop add moonbit-refactoring@f4ah6o/skills-bonsai --target codex
+  gh skill install moonbitlang/moonbit-agent-guide moonbit-agent-guide --agent codex --scope user --force
+  gh skill install moonbitlang/moonbit-agent-guide moonbit-refactoring --agent codex --scope user --force
+
+# Refactor a single repo using the moonbit-refactoring skill.
+# Validates clone, cleanliness, moon module, and skill presence; prints the
+# workflow steps the agent should follow.
+# Example: just refactor n8n.mbt
+refactor repo:
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    name="{{repo}}"; \
+    name="${name##*/}"; \
+    path="{{REPOS_DIR}}/$name"; \
+    if [[ ! -d "$path/.git" ]]; then \
+      echo "missing clone: $path" >&2; \
+      echo "hint: add to {{REPO_LIST}} and run \"just clone\"" >&2; \
+      exit 1; \
+    fi; \
+    if ! repo_is_moon "$path"; then \
+      echo "not a moon module (missing moon.mod.json): $path" >&2; \
+      exit 1; \
+    fi; \
+    if repo_is_dirty "$path"; then \
+      echo "repo is dirty: $path" >&2; \
+      echo "hint: commit or stash before refactoring" >&2; \
+      exit 1; \
+    fi; \
+    skill_root="$HOME/.codex/skills"; \
+    missing_skill=0; \
+    for skill in moonbit-agent-guide moonbit-refactoring; do \
+      if [[ ! -f "$skill_root/$skill/SKILL.md" ]]; then \
+        echo "missing skill: $skill_root/$skill/SKILL.md" >&2; \
+        missing_skill=1; \
+      fi; \
+    done; \
+    if [[ "$missing_skill" -ne 0 ]]; then \
+      echo "hint: just skills-init" >&2; \
+      exit 1; \
+    fi; \
+    branch_default="refactor/$(date +%Y%m%d)"; \
+    echo "repo:    $path"; \
+    echo "skill:   moonbit-refactoring (via moonbit-agent-guide)"; \
+    echo ""; \
+    echo "workflow:"; \
+    echo "  1. cd $path"; \
+    echo "  2. git switch -c $branch_default  # or use an existing branch"; \
+    echo "  3. start codex (or claude) in that directory and invoke moonbit-refactoring"; \
+    echo "  4. follow the skill workflow: architecture review -> API inventory -> smallest safe change"; \
+    echo "  5. moon check && moon test"; \
+    echo "  6. commit + push + open PR"'
 
 # Run moon test for a single repo under ./repos
 moon-test repo:
