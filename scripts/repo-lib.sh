@@ -116,41 +116,48 @@ list_target_repo_entries() {
 }
 
 list_extra_cloned_repo_entries() {
-  local -A active_names=()
+  local active_names
   local repo
   local name
   local path
 
+  active_names=''
+
   while IFS=$'\t' read -r repo name path; do
-    active_names["$name"]=1
+    active_names+="${name}"$'\n'
   done < <(list_active_repo_entries)
 
   while IFS=$'\t' read -r repo name path; do
-    [[ -n "${active_names[$name]:-}" ]] && continue
+    if printf '%s' "$active_names" | grep -Fqx "$name"; then
+      continue
+    fi
     printf '%s\t%s\t%s\n' "$repo" "$name" "$path"
   done < <(list_cloned_repo_entries)
 }
 
 validate_repo_list() {
-  local -A seen_repo=()
-  local -A seen_name=()
+  local seen_repo
+  local seen_name
   local ok=1
   local repo
   local name
   local path
 
+  seen_repo=''
+  seen_name=''
+
   while IFS=$'\t' read -r repo name path; do
-    if [[ -n "${seen_repo[$repo]:-}" ]]; then
+    if printf '%s' "$seen_repo" | grep -Fqx "$repo"; then
       echo "duplicate active repo: $repo" >&2
       ok=0
     fi
-    seen_repo["$repo"]=1
+    seen_repo+="${repo}"$'\n'
 
-    if [[ -n "${seen_name[$name]:-}" ]]; then
+    if printf '%s' "$seen_name" | grep -Fqx "$name"; then
       echo "basename collision in active repos: $name" >&2
       ok=0
     fi
-    seen_name["$name"]=1
+    seen_name+="${name}"$'\n'
   done < <(list_active_repo_entries)
 
   [[ "$ok" -eq 1 ]]
