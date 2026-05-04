@@ -47,6 +47,30 @@ repo_ahead_count() {
   git -C "$path" rev-list --count '@{upstream}..HEAD' 2>/dev/null || printf '0\n'
 }
 
+repo_bare_name() {
+  local dir="$1"
+  local gitfile="$dir/.git"
+  local target base
+
+  if [[ -f "$gitfile" ]]; then
+    target="$(awk '/^gitdir:/ {sub(/^gitdir:[[:space:]]*/, ""); print; exit}' "$gitfile" 2>/dev/null || true)"
+    [[ -n "$target" ]] || return 1
+    case "$target" in
+      */worktrees/*) target="${target%/worktrees/*}" ;;
+    esac
+    base="$(basename "$target")"
+    base="${base%.git}"
+    [[ -n "$base" ]] || return 1
+    printf '%s\n' "$base"
+    return 0
+  fi
+  if [[ -d "$gitfile" ]]; then
+    basename "$dir"
+    return 0
+  fi
+  return 1
+}
+
 repo_is_moon() {
   local path="$1"
   [[ -f "$path/moon.mod.json" ]]
@@ -86,37 +110,51 @@ list_active_repo_entries() {
 }
 
 list_cloned_repo_entries() {
-  local dir
-  local base
-  local name
-  local repo
-  local bare
-  local worktree
-  local seen=''
-  local slug
+  local dir base name repo slug
 
   shopt -s nullglob
   for dir in "$REPOS_DIR"/*; do
     [[ -d "$dir" ]] || continue
     base="$(basename "$dir")"
-    case "$base" in
-      *.git) name="${base%.git}" ;;
-      *)     name="$base" ;;
-    esac
-    case $'\n'"$seen"$'\n' in
-      *$'\n'"$name"$'\n'*) continue ;;
-    esac
-    seen="${seen}${name}"$'\n'
-    bare="$REPOS_DIR/$name.git"
-    worktree="$REPOS_DIR/$name"
-    [[ -d "$bare" || -e "$worktree/.git" ]] || continue
-    repo="$name"
-    if [[ -e "$worktree/.git" ]]; then
-      if slug="$(repo_slug_from_path "$worktree")"; then repo="$slug"; fi
-    elif [[ -d "$bare" ]]; then
-      if slug="$(repo_slug_from_path "$bare")"; then repo="$slug"; fi
+    [[ "$base" == *.git ]] && continue
+    [[ -e "$dir/.git" ]] || continue
+    if ! name="$(repo_bare_name "$dir" 2>/dev/null)"; then
+      name="$base"
     fi
-    printf '%s\t%s\t%s\n' "$repo" "$name" "$worktree"
+    repo="$name"
+    if slug="$(repo_slug_from_path "$dir" 2>/dev/null)"; then
+      repo="$slug"
+    fi
+    printf '%s\t%s\t%s\n' "$repo" "$name" "$dir"
+  done | sort
+}
+
+list_orphan_bare_entries() {
+  local bare base name repo slug dir wname has_worktree
+
+  shopt -s nullglob
+  for bare in "$REPOS_DIR"/*.git; do
+    [[ -d "$bare" ]] || continue
+    base="$(basename "$bare")"
+    name="${base%.git}"
+    has_worktree=0
+    for dir in "$REPOS_DIR"/*; do
+      [[ -d "$dir" ]] || continue
+      [[ "$(basename "$dir")" == *.git ]] && continue
+      [[ -e "$dir/.git" ]] || continue
+      if wname="$(repo_bare_name "$dir" 2>/dev/null)"; then
+        if [[ "$wname" == "$name" ]]; then
+          has_worktree=1
+          break
+        fi
+      fi
+    done
+    [[ "$has_worktree" -eq 1 ]] && continue
+    repo="$name"
+    if slug="$(repo_slug_from_path "$bare" 2>/dev/null)"; then
+      repo="$slug"
+    fi
+    printf '%s\t%s\t%s\n' "$repo" "$name" "$bare"
   done | sort
 }
 
@@ -149,6 +187,13 @@ list_extra_cloned_repo_entries() {
     fi
     printf '%s\t%s\t%s\n' "$repo" "$name" "$path"
   done < <(list_cloned_repo_entries)
+
+  while IFS=$'\t' read -r repo name path; do
+    if printf '%s' "$active_names" | grep -Fqx "$name"; then
+      continue
+    fi
+    printf '%s\t%s\t%s\n' "$repo" "$name" "$path"
+  done < <(list_orphan_bare_entries)
 }
 
 validate_repo_list() {

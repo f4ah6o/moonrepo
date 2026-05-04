@@ -191,12 +191,22 @@ repos-prune *args:
           continue; \
         fi; \
         bare="{{REPOS_DIR}}/${name}.git"; \
-        if [[ -d "$bare" && -e "$path/.git" ]]; then \
-          git -C "$bare" worktree remove --force "../${name}" 2>/dev/null || rm -rf "$path"; \
+        if [[ "$path" == "$bare" ]]; then \
+          rm -rf "$bare"; \
         else \
-          rm -rf "$path"; \
+          if [[ -d "$bare" && -e "$path/.git" ]]; then \
+            wt_abs="$(cd "$path" && pwd)"; \
+            git -C "$bare" worktree remove --force "$wt_abs" 2>/dev/null || rm -rf "$path"; \
+          else \
+            rm -rf "$path"; \
+          fi; \
+          if [[ -d "$bare" ]]; then \
+            remaining="$(git -C "$bare" worktree list --porcelain 2>/dev/null | awk "/^worktree /{c++} END{print c+0}")"; \
+            if [[ "$remaining" -le 1 ]]; then \
+              rm -rf "$bare"; \
+            fi; \
+          fi; \
         fi; \
-        rm -rf "$bare"; \
         echo "pruned: $repo"; \
       fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
@@ -222,7 +232,6 @@ pull:
         continue; \
       fi; \
       echo "pull: $repo"; \
-      git -C "$path" fetch --prune origin || true; \
       if git -C "$path" pull --ff-only; then \
         ok=$((ok + 1)); \
       else \
