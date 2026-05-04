@@ -87,20 +87,36 @@ list_active_repo_entries() {
 
 list_cloned_repo_entries() {
   local dir
+  local base
   local name
   local repo
+  local bare
+  local worktree
+  local seen=''
+  local slug
 
   shopt -s nullglob
   for dir in "$REPOS_DIR"/*; do
-    [[ -d "$dir/.git" ]] || continue
-    name="$(basename "$dir")"
+    [[ -d "$dir" ]] || continue
+    base="$(basename "$dir")"
+    case "$base" in
+      *.git) name="${base%.git}" ;;
+      *)     name="$base" ;;
+    esac
+    case $'\n'"$seen"$'\n' in
+      *$'\n'"$name"$'\n'*) continue ;;
+    esac
+    seen="${seen}${name}"$'\n'
+    bare="$REPOS_DIR/$name.git"
+    worktree="$REPOS_DIR/$name"
+    [[ -d "$bare" || -e "$worktree/.git" ]] || continue
     repo="$name"
-    if repo="$(repo_slug_from_path "$dir")"; then
-      :
-    else
-      repo="$name"
+    if [[ -e "$worktree/.git" ]]; then
+      if slug="$(repo_slug_from_path "$worktree")"; then repo="$slug"; fi
+    elif [[ -d "$bare" ]]; then
+      if slug="$(repo_slug_from_path "$bare")"; then repo="$slug"; fi
     fi
-    printf '%s\t%s\t%s\n' "$repo" "$name" "$dir"
+    printf '%s\t%s\t%s\n' "$repo" "$name" "$worktree"
   done | sort
 }
 

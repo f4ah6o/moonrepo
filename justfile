@@ -82,8 +82,19 @@ clone:
     mkdir -p "{{REPOS_DIR}}"; \
     if [[ ! -f "{{REPO_LIST}}" ]]; then echo "missing {{REPO_LIST}}"; exit 1; fi; \
     while IFS=$'\''\t'\'' read -r repo name dest; do \
-      if [[ -d "$dest/.git" ]]; then echo "skip (exists): $repo -> $dest"; continue; fi; \
-      gh repo clone "$repo" "$dest"; \
+      bare="{{REPOS_DIR}}/${name}.git"; \
+      if [[ -d "$bare" && -e "$dest/.git" ]]; then echo "skip (exists): $repo -> $dest"; continue; fi; \
+      if [[ ! -d "$bare" ]]; then \
+        echo "clone --bare: $repo -> $bare"; \
+        git clone --bare "https://github.com/${repo}.git" "$bare"; \
+        git -C "$bare" remote set-head origin --auto >/dev/null; \
+      fi; \
+      if [[ ! -e "$dest/.git" ]]; then \
+        default_ref="$(git -C "$bare" symbolic-ref refs/remotes/origin/HEAD)"; \
+        default_branch="${default_ref#refs/remotes/origin/}"; \
+        echo "worktree add: $dest @ $default_branch"; \
+        git -C "$bare" worktree add "../${name}" "$default_branch"; \
+      fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh list active)'
 
 cclone: clean clone
@@ -122,10 +133,17 @@ doctor:
     fi; \
     active_missing=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ -d "$path/.git" ]]; then \
+      bare="{{REPOS_DIR}}/${name}.git"; \
+      ok=1; \
+      if [[ ! -d "$bare" ]]; then \
+        echo "missing bare: $repo -> $bare" >&2; ok=0; \
+      fi; \
+      if [[ ! -e "$path/.git" ]]; then \
+        echo "missing worktree: $repo -> $path" >&2; ok=0; \
+      fi; \
+      if [[ "$ok" -eq 1 ]]; then \
         echo "ok active clone: $repo"; \
       else \
-        echo "missing active clone: $repo -> $path" >&2; \
         active_missing=$((active_missing + 1)); \
       fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh list active); \
@@ -162,7 +180,7 @@ repos-prune *args:
       count=$((count + 1)); \
       dirty=0; \
       ahead=0; \
-      if [[ -d "$path/.git" ]]; then \
+      if [[ -e "$path/.git" ]]; then \
         if repo_is_dirty "$path"; then dirty=1; fi; \
         if [[ "$(repo_ahead_count "$path")" != "0" ]]; then ahead=1; fi; \
       fi; \
@@ -172,7 +190,13 @@ repos-prune *args:
           echo "skip protected prune: $repo"; \
           continue; \
         fi; \
-        rm -rf "$path"; \
+        bare="{{REPOS_DIR}}/${name}.git"; \
+        if [[ -d "$bare" && -e "$path/.git" ]]; then \
+          git -C "$bare" worktree remove --force "../${name}" 2>/dev/null || rm -rf "$path"; \
+        else \
+          rm -rf "$path"; \
+        fi; \
+        rm -rf "$bare"; \
         echo "pruned: $repo"; \
       fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
@@ -187,7 +211,7 @@ pull:
     source scripts/repo-lib.sh; \
     ok=0; skipped_dirty=0; missing=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -198,6 +222,7 @@ pull:
         continue; \
       fi; \
       echo "pull: $repo"; \
+      git -C "$path" fetch --prune origin || true; \
       if git -C "$path" pull --ff-only; then \
         ok=$((ok + 1)); \
       else \
@@ -212,7 +237,7 @@ push-all:
   @bash -ceu 'set -euo pipefail; \
     ok=0; missing=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -232,7 +257,7 @@ config name email:
   @bash -ceu 'set -euo pipefail; \
     ok=0; missing=0; \
     while IFS=$'\''\t'\'' read -r repo target_name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -405,7 +430,7 @@ deps-scan-all *args:
     missing=0; \
     cmd=(moon-dst scan --root "{{REPOS_DIR}}"); \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
       fi; \
@@ -430,7 +455,7 @@ deps-apply-all *args:
     missing=0; skipped_dirty=0; \
     cmd=(moon-dst apply --root "{{REPOS_DIR}}"); \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -461,7 +486,7 @@ deps-just-all *args:
     missing=0; skipped_dirty=0; \
     cmd=(moon-dst just --root "{{REPOS_DIR}}"); \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -507,7 +532,7 @@ moon-fmt-all:
     source scripts/repo-lib.sh; \
     ok=0; missing=0; skipped_not_moon=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -528,7 +553,7 @@ moon-check-all:
     source scripts/repo-lib.sh; \
     ok=0; missing=0; skipped_not_moon=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -549,7 +574,7 @@ moon-build-all:
     source scripts/repo-lib.sh; \
     ok=0; missing=0; skipped_not_moon=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -570,7 +595,7 @@ moon-clean-all:
     source scripts/repo-lib.sh; \
     ok=0; missing=0; skipped_not_moon=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -605,7 +630,7 @@ moon-test-all:
     source scripts/repo-lib.sh; \
     ok=0; missing=0; skipped_not_moon=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -659,7 +684,7 @@ refactor repo:
     name="{{repo}}"; \
     name="${name##*/}"; \
     path="{{REPOS_DIR}}/$name"; \
-    if [[ ! -d "$path/.git" ]]; then \
+    if [[ ! -e "$path/.git" ]]; then \
       echo "missing clone: $path" >&2; \
       echo "hint: add to {{REPO_LIST}} and run \"just clone\"" >&2; \
       exit 1; \
@@ -718,7 +743,7 @@ status-all:
   @bash -ceu 'set -euo pipefail; \
     missing=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
@@ -736,7 +761,7 @@ gh-runs-last-all:
     printf "%-40s | %-24s | %-10s | %-10s | %s\n" "repo" "workflow" "status" "conclusion" "url"; \
     printf "%-40s-+-%-24s-+-%-10s-+-%-10s-+-%s\n" "----------------------------------------" "------------------------" "----------" "----------" "------------------------------"; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         printf "%-40s | %-24s | %-10s | %-10s | %s\n" "$repo" "-" "missing" "-" "$path"; \
         missing=$((missing + 1)); \
         continue; \
@@ -770,7 +795,7 @@ gh-runs-rerun-failed-all *args:
     done; \
     rerun=0; failed=0; missing=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
-      if [[ ! -d "$path/.git" ]]; then \
+      if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
