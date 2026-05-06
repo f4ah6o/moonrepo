@@ -1,5 +1,6 @@
 repos/
 skills/
+!.agents/skills/
 .DS_Store
 .claude/worktrees/
 

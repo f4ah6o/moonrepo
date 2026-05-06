@@ -735,6 +735,35 @@ refactor repo:
 moon-test repo:
   moon -C "{{REPOS_DIR}}/{{repo}}" test
 
+# Migrate GitHub Issues to local issues/ directory for a single repo
+# Example: just issues-migrate mhx.mbt
+# Example: just issues-migrate mhx.mbt --force --dry-run
+issues-migrate repo *args:
+  @bash .agents/skills/issues-migrate/scripts/migrate-issues.sh "{{repo}}" {{args}}
+
+# Migrate GitHub Issues to local issues/ directory for all active repos
+# Example: just issues-migrate-all
+# Example: just issues-migrate-all --dry-run
+issues-migrate-all *args:
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    ok=0; missing=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -e "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      echo "migrate: $repo"; \
+      if bash .agents/skills/issues-migrate/scripts/migrate-issues.sh "$name" {{args}}; then \
+        ok=$((ok + 1)); \
+      else \
+        failed=$((failed + 1)); \
+      fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
+
 # Standard CI entrypoints for this repo
 apply: deps-apply-all
 

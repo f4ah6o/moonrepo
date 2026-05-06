@@ -63,7 +63,14 @@ monorepo ではありません。
    - `.tool-versions` と `.github/workflows/*.yml` の `cli.moonbitlang.com/install/unix.sh` 行だけを更新する
    - `moonbitlang/*` deps は対象外（`just deps-apply-all` を別途実行）
    - 未 clone の repo は warn のみでスキップ（自動 clone はしない）
-13. MoonBit repo の refactoring（`moonbit-refactoring` skill 経由）
+13. GitHub Issues のローカル移行（`issues-migrate` skill 経由）
+   - `just issues-migrate <repo>` で GitHub Issues を `issues/` に移行
+   - `just issues-migrate-all` で全 active repo を一括移行
+   - `--force` で既存ファイル上書き、`--dry-run` で確認のみ
+   - 移行後 GitHub 側の issue にコメント付与 → close
+   - AGENTS.md/CLAUDE.md に issues ワークフローセクションが追記される
+   - README.md に shiguredo/http3-rs への参考元リンクが追記される
+14. MoonBit repo の refactoring（`moonbit-refactoring` skill 経由）
    - 前提: `just skills-init` 済みで対象 repo が clean
    - `just refactor <repo>` で環境検証と次手順の出力
    - 出力に従って `refactor/<date>` ブランチを切り、codex/claude で skill を起動
