@@ -184,7 +184,7 @@ for name in "${names[@]}"; do
   path="$REPOS_DIR/$name"
   slug="$OWNER/$name"
 
-  if [[ ! -d "$path/.git" ]]; then
+  if [[ ! -e "$path/.git" ]]; then
     echo "missing clone: $slug -> $path" >&2
     missing_clone=$((missing_clone + 1))
     continue

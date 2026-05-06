@@ -52,6 +52,8 @@ just init <owner> --topics moonbit rust
 just clone
 ```
 
+`just clone` は各リポジトリを bare clone (`repos/<name>.git/`) として取得し、その既定ブランチ（`origin/HEAD`）を `repos/<name>/` に `git worktree add` します。`repos/<name>/.git` はディレクトリではなく gitlink ファイルになります。複数ブランチで並行作業したい場合は、bare 側から追加 worktree を生やしてください（例: `git -C repos/<name>.git worktree add ../<name>-feat feat-branch`）。レイアウト変更時は `just --set FORCE 1 cclone` で作り直してください。
+
 4. pull（既存リポジトリの更新）
 
 ```sh
