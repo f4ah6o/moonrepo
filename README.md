@@ -33,6 +33,27 @@ just skills-init
 - <https://github.com/moonbitlang/skills>
 - <https://github.com/moonbitlang/moonbit-agent-guide>
 
+## Codex 実装フロー
+
+`repos/<repo>` 配下の実装変更は、親 thread が直接その clone を触るのではなく、`just codex-start <repo> <task-slug>` を入口にして専用 worktree へ切り出す運用を標準にします。
+
+- 親 thread は moonrepo 側に残って orchestration だけを行う
+- 実装変更は対象 worktree を所有する Codex worker sub agent に寄せる
+- 親 thread は最後に review / verification / push / draft PR 作成を担当する
+
+`just codex-start` は clone の clean 状態と upstream を確認し、`worktrees/<repo>-<task-slug>-<YYYYMMDD>/` と `codex/<task-slug>` branch、`.codex/tasks/<repo>-<task-slug>.json` manifest を作ります。完了後に worker 起動用の Codex prompt を出力します。
+
+状態確認と PR 作成:
+
+```sh
+just codex-status <repo> <task-slug>
+just codex-pr <repo> <task-slug>
+```
+
+`just codex-pr` は worktree の clean 状態、upstream、`gh` 認証、base branch の required checks を確認し、通過時だけ draft PR を作成します。
+
+ドキュメント専用の review では、repo local skill `docs-humanizer` を使います。Zenn の anti-AI-writing 記事をもとに、日本語の repository docs 向けチェックリストと audit script を入れています。
+
 ## 使い方
 
 1. `repository.ini` を初期生成
@@ -86,6 +107,23 @@ just topics-add-from-ini rust
 just topics-add-from-ini rust --apply
 ```
 
+7. `repos/` 配下の実装作業を始める場合
+
+```sh
+just codex-start <repo> <task-slug>
+```
+
+出力された prompt に従って worker を起動し、実装は作成済み worktree で進めます。親 thread は `just codex-status` で状態を見て、最後に `just codex-pr` で draft PR を開きます。
+
+8. `repos/` 配下の document を監査・改善する場合
+
+```sh
+just docs-audit <repo>
+just docs-review <repo> <task-slug>
+```
+
+`just docs-audit` は tracked documents を対象に、AI っぽい文体の機械検査を行います。`just docs-review` は `codex-start` で専用 worktree を作り、その worktree に対して `docs-humanizer` skill と audit の手順を出力します。
+
 ## よく使うコマンド
 
 - 前提と対象状態の確認
@@ -127,6 +165,12 @@ just topics-add-from-ini rust --apply
 - 単一 repo の refactoring 準備（moonbit-refactoring skill を使う）
   - `just refactor <repo>`
   - 対象 repo の clean 状態、moon モジュール認識、skill インストール済みを検証し、ブランチ作成と skill 起動の手順を出力します。
+  - 将来的には `just codex-start <repo> <task-slug>` ベースの入口へ寄せる前提ですが、現状は MoonBit refactoring 専用の軽量フローとして残します。
+- document audit / improvement
+  - `just docs-audit <repo>`
+  - `just docs-audit-all`
+  - `just docs-review <repo> <task-slug>`
+  - audit は tracked `.md` / `.mdx` / `.txt` / `.rst` / `.adoc` を対象に、機械検査で拾える AI っぽいパターンを報告します。改善時は repo local skill `docs-humanizer` を使います。
 
 ## 詳細
 
