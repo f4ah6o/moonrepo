@@ -47,33 +47,202 @@ repo_ahead_count() {
   git -C "$path" rev-list --count '@{upstream}..HEAD' 2>/dev/null || printf '0\n'
 }
 
-repo_bare_name() {
+repo_behind_count() {
+  local path="$1"
+  if ! git -C "$path" rev-parse --verify '@{upstream}' >/dev/null 2>&1; then
+    printf '0\n'
+    return 0
+  fi
+
+  git -C "$path" rev-list --count 'HEAD..@{upstream}' 2>/dev/null || printf '0\n'
+}
+
+repo_gitdir_path() {
   local dir="$1"
   local gitfile="$dir/.git"
-  local target base
+  local target parent
 
-  if [[ -f "$gitfile" ]]; then
-    target="$(awk '/^gitdir:/ {sub(/^gitdir:[[:space:]]*/, ""); print; exit}' "$gitfile" 2>/dev/null || true)"
-    [[ -n "$target" ]] || return 1
-    case "$target" in
-      */worktrees/*) target="${target%/worktrees/*}" ;;
-    esac
-    base="$(basename "$target")"
+  if [[ -d "$gitfile" ]]; then
+    printf '%s\n' "$gitfile"
+    return 0
+  fi
+  if [[ ! -f "$gitfile" ]]; then
+    return 1
+  fi
+
+  target="$(awk '/^gitdir:/ {sub(/^gitdir:[[:space:]]*/, ""); print; exit}' "$gitfile" 2>/dev/null || true)"
+  [[ -n "$target" ]] || return 1
+  if [[ "$target" != /* ]]; then
+    parent="$(cd "$dir" && dirname "$target")"
+    target="$(cd "$dir/$parent" && pwd)/$(basename "$target")"
+  fi
+  printf '%s\n' "$target"
+}
+
+repo_bare_name() {
+  local dir="$1"
+  local base
+
+  if base="$(repo_bare_dir "$dir" 2>/dev/null)"; then
+    base="$(basename "$base")"
     base="${base%.git}"
     [[ -n "$base" ]] || return 1
     printf '%s\n' "$base"
     return 0
   fi
-  if [[ -d "$gitfile" ]]; then
-    basename "$dir"
-    return 0
-  fi
   return 1
+}
+
+repo_bare_dir() {
+  local dir="$1"
+  local target
+
+  target="$(repo_gitdir_path "$dir")" || return 1
+  case "$target" in
+    */worktrees/*) target="${target%/worktrees/*}" ;;
+  esac
+  printf '%s\n' "$target"
 }
 
 repo_is_moon() {
   local path="$1"
   [[ -f "$path/moon.mod.json" ]]
+}
+
+repo_current_branch() {
+  local path="$1"
+  git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null
+}
+
+repo_upstream_ref() {
+  local path="$1"
+  git -C "$path" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null
+}
+
+repo_default_branch() {
+  local path="$1"
+  local ref
+
+  ref="$(git -C "$path" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)"
+  [[ -n "$ref" ]] || return 1
+  printf '%s\n' "${ref#refs/remotes/origin/}"
+}
+
+repo_branch_exists() {
+  local path="$1"
+  local branch="$2"
+  local bare
+
+  bare="$(repo_bare_dir "$path")" || return 1
+  git -C "$bare" show-ref --verify --quiet "refs/heads/$branch"
+}
+
+repo_remote_branch_exists() {
+  local path="$1"
+  local branch="$2"
+  local bare
+
+  bare="$(repo_bare_dir "$path")" || return 1
+  git -C "$bare" show-ref --verify --quiet "refs/remotes/origin/$branch"
+}
+
+repo_worktree_exists() {
+  local path="$1"
+  local bare="$2"
+  local candidate
+
+  candidate="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+  git -C "$bare" worktree list --porcelain \
+    | awk '/^worktree / {sub(/^worktree /, ""); print}' \
+    | grep -Fxq "$candidate"
+}
+
+codex_normalize_task_slug() {
+  local raw="$1"
+  local slug
+
+  slug="$(printf '%s' "$raw" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's|[^a-z0-9._-]+|-|g; s|^[._-]+||; s|[._-]+$||; s|-+|-|g')"
+  [[ -n "$slug" ]] || return 1
+  printf '%s\n' "$slug"
+}
+
+codex_branch_name() {
+  local raw="$1"
+  local slug
+
+  slug="$(codex_normalize_task_slug "$raw")" || return 1
+  printf 'codex/%s\n' "$slug"
+}
+
+codex_worktree_name() {
+  local repo_name="$1"
+  local raw_slug="$2"
+  local stamp="$3"
+  local slug
+
+  slug="$(codex_normalize_task_slug "$raw_slug")" || return 1
+  printf '%s-%s-%s\n' "$repo_name" "$slug" "$stamp"
+}
+
+codex_manifest_path() {
+  local tasks_dir="$1"
+  local repo_name="$2"
+  local raw_slug="$3"
+  local slug
+
+  slug="$(codex_normalize_task_slug "$raw_slug")" || return 1
+  printf '%s/%s-%s.json\n' "$tasks_dir" "$repo_name" "$slug"
+}
+
+codex_resolve_manifest_path() {
+  local tasks_dir="$1"
+  local repo_name="$2"
+  local raw_slug="$3"
+  local path
+
+  path="$(codex_manifest_path "$tasks_dir" "$repo_name" "$raw_slug")" || return 1
+  [[ -f "$path" ]] || return 1
+  printf '%s\n' "$path"
+}
+
+update_manifest_status() {
+  local manifest_path="$1"
+  local status="$2"
+  local tmp
+
+  tmp="$(mktemp)"
+  jq --arg status "$status" '.status = $status' "$manifest_path" >"$tmp"
+  mv "$tmp" "$manifest_path"
+}
+
+repo_add_worktree() {
+  local repo_path="$1"
+  local worktree_path="$2"
+  local branch="$3"
+  local base_ref="$4"
+  local bare
+
+  bare="$(repo_bare_dir "$repo_path")" || return 1
+  if [[ -e "$worktree_path" ]]; then
+    echo "worktree path already exists: $worktree_path" >&2
+    return 1
+  fi
+  if repo_worktree_exists "$worktree_path" "$bare"; then
+    echo "worktree already registered: $worktree_path" >&2
+    return 1
+  fi
+  if repo_branch_exists "$repo_path" "$branch"; then
+    echo "branch already exists: $branch" >&2
+    return 1
+  fi
+  if repo_remote_branch_exists "$repo_path" "$branch"; then
+    echo "remote branch already exists: origin/$branch" >&2
+    return 1
+  fi
+  mkdir -p "$(dirname "$worktree_path")"
+  git -C "$bare" worktree add -b "$branch" "$worktree_path" "$base_ref"
 }
 
 list_active_repo_entries() {

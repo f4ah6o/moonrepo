@@ -683,6 +683,22 @@ skills-init:
   gh skill install moonbitlang/moonbit-agent-guide moonbit-agent-guide --agent codex --scope user --force
   gh skill install moonbitlang/moonbit-agent-guide moonbit-refactoring --agent codex --scope user --force
 
+# Start a codex-managed repo task in a dedicated worktree.
+# Example: just codex-start n8n.mbt deps-bump
+codex-start repo task:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/codex-task.sh start "{{repo}}" "{{task}}"
+
+# Show the state of a codex-managed repo task.
+# Example: just codex-status n8n.mbt deps-bump
+codex-status repo task:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/codex-task.sh status "{{repo}}" "{{task}}"
+
+# Open a draft PR for a codex-managed repo task.
+# Example: just codex-pr n8n.mbt deps-bump
+# Example: just codex-pr n8n.mbt deps-bump --dry-run
+codex-pr repo task *args:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/codex-task.sh pr "{{repo}}" "{{task}}" {{args}}
+
 # Refactor a single repo using the moonbit-refactoring skill.
 # Validates clone, cleanliness, moon module, and skill presence; prints the
 # workflow steps the agent should follow.

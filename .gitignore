@@ -1,8 +1,10 @@
 repos/
+worktrees/
 skills/
 !.agents/skills/
 .DS_Store
 .claude/worktrees/
+.codex/
 
 repository.ini
 .playwright-cli/

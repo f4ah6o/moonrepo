@@ -1,0 +1,395 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/.." && pwd)"
+# shellcheck source=./repo-lib.sh
+source "$script_dir/repo-lib.sh"
+
+TASKS_DIR="${TASKS_DIR:-$repo_root/.codex/tasks}"
+WORKTREES_DIR="${WORKTREES_DIR:-$repo_root/worktrees}"
+
+usage() {
+  cat <<'EOF' >&2
+usage:
+  codex-task.sh start <repo> <task-slug>
+  codex-task.sh status <repo> <task-slug>
+  codex-task.sh pr <repo> <task-slug> [gh pr create args...]
+EOF
+}
+
+die() {
+  echo "$*" >&2
+  exit 1
+}
+
+normalize_repo_name() {
+  local repo="${1##*/}"
+  [[ -n "$repo" ]] || return 1
+  printf '%s\n' "$repo"
+}
+
+repo_path_from_name() {
+  local name="$1"
+  printf '%s/%s\n' "$REPOS_DIR" "$name"
+}
+
+require_clone_path() {
+  local repo_name="$1"
+  local path
+
+  path="$(repo_path_from_name "$repo_name")"
+  if [[ ! -e "$path/.git" ]]; then
+    die "missing clone: $path"$'\n'"hint: add to $REPO_LIST and run \"just clone\""
+  fi
+  printf '%s\n' "$path"
+}
+
+require_repo_upstream() {
+  local path="$1"
+  if ! repo_upstream_ref "$path" >/dev/null 2>&1; then
+    die "repo has no upstream: $path"
+  fi
+}
+
+require_clean_repo() {
+  local path="$1"
+  if repo_is_dirty "$path"; then
+    die "repo is dirty: $path"$'\n'"hint: commit or stash before starting a codex task"
+  fi
+}
+
+write_manifest() {
+  local manifest_path="$1"
+  local repo_name="$2"
+  local worktree_path="$3"
+  local branch="$4"
+  local base="$5"
+  local repo_slug="$6"
+
+  mkdir -p "$(dirname "$manifest_path")"
+  jq -n \
+    --arg repo "$repo_name" \
+    --arg repo_slug "$repo_slug" \
+    --arg worktree "$worktree_path" \
+    --arg branch "$branch" \
+    --arg base "$base" \
+    --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg agent "codex" \
+    --arg status "started" \
+    '{
+      repo: $repo,
+      repo_slug: $repo_slug,
+      worktree: $worktree,
+      branch: $branch,
+      base: $base,
+      created_at: $created_at,
+      agent: $agent,
+      status: $status
+    }' > "$manifest_path"
+}
+
+manifest_field() {
+  local manifest_path="$1"
+  local key="$2"
+  jq -r --arg key "$key" '.[$key] // empty' "$manifest_path"
+}
+
+load_manifest() {
+  local repo_name="$1"
+  local task_slug="$2"
+  local manifest_path
+
+  manifest_path="$(codex_resolve_manifest_path "$TASKS_DIR" "$repo_name" "$task_slug")" \
+    || die "missing manifest: $(codex_manifest_path "$TASKS_DIR" "$repo_name" "$task_slug")"$'\n'"hint: run \"just codex-start $repo_name $task_slug\" first"
+  printf '%s\n' "$manifest_path"
+}
+
+print_worker_prompt() {
+  local repo_name="$1"
+  local worktree_path="$2"
+  local branch="$3"
+  local manifest_path="$4"
+
+  cat <<EOF
+manifest: $manifest_path
+repo:     $repo_name
+worktree: $worktree_path
+branch:   $branch
+agent:    codex worker
+
+codex parent-thread prompt:
+  Spawn exactly one worker sub agent for $worktree_path.
+  The worker owns all edits inside that worktree and does the repository implementation work.
+  The parent thread must stay in moonrepo, perform orchestration only, then review, verify, push, and open the PR after the worker finishes.
+EOF
+}
+
+branch_protection_json() {
+  local repo_slug="$1"
+  local base_branch="$2"
+  gh api "repos/$repo_slug/branches/$base_branch/protection" 2>/dev/null || return 1
+}
+
+verify_required_checks() {
+  local repo_slug="$1"
+  local base_branch="$2"
+  local worktree_path="$3"
+  local sha status_json protection_json checks_json contexts_json failures missing required_count=0
+
+  if ! protection_json="$(branch_protection_json "$repo_slug" "$base_branch")"; then
+    echo "checks: branch protection unavailable or not enabled; skipping required-check verification"
+    return 0
+  fi
+
+  checks_json="$(jq -c '
+    [
+      (.required_status_checks.contexts // [] | map({kind: "status", name: .})),
+      (.required_status_checks.checks // [] | map({kind: "check", name: .context}))
+    ] | add | unique_by(.kind + ":" + .name)
+  ' <<<"$protection_json")"
+  required_count="$(jq 'length' <<<"$checks_json")"
+  if [[ "$required_count" -eq 0 ]]; then
+    echo "checks: no required checks configured on $base_branch"
+    return 0
+  fi
+
+  sha="$(git -C "$worktree_path" rev-parse HEAD)"
+  status_json="$(gh api "repos/$repo_slug/commits/$sha/status" 2>/dev/null || true)"
+  contexts_json="$(gh api "repos/$repo_slug/commits/$sha/check-runs" -H "Accept: application/vnd.github+json" 2>/dev/null || true)"
+
+  failures="$(
+    jq -r \
+      --argjson required "$checks_json" \
+      --argjson statuses "${status_json:-{\"statuses\":[]}}" \
+      --argjson checks "${contexts_json:-{\"check_runs\":[]}}" '
+      def status_state($name):
+        ($statuses.statuses // [] | map(select(.context == $name)) | first | .state) // "missing";
+      def check_state($name):
+        ($checks.check_runs // [] | map(select(.name == $name)) | first) as $run
+        | if $run == null then
+            "missing"
+          elif ($run.status // "") != "completed" then
+            "pending"
+          else
+            ($run.conclusion // "missing")
+          end;
+      $required[]
+      | .state =
+          (if .kind == "status" then status_state(.name) else check_state(.name) end)
+      | select(
+          (.kind == "status" and .state != "success")
+          or
+          (.kind == "check" and (.state != "success" and .state != "neutral" and .state != "skipped"))
+        )
+      | "\(.kind)\t\(.name)\t\(.state)"
+    ' <<<"{}"
+  )"
+
+  if [[ -n "$failures" ]]; then
+    echo "required checks are not green for $repo_slug@$sha:" >&2
+    while IFS=$'\t' read -r kind name state; do
+      [[ -n "$kind" ]] || continue
+      echo "  - $kind $name: $state" >&2
+    done <<<"$failures"
+    return 1
+  fi
+
+  echo "checks: all $required_count required checks passed for $sha"
+}
+
+start_cmd() {
+  local repo_name raw_slug repo_path default_branch base_ref branch_name worktree_name
+  local worktree_path manifest_path repo_slug bare_dir
+
+  [[ $# -eq 2 ]] || die "usage: codex-task.sh start <repo> <task-slug>"
+  repo_name="$(normalize_repo_name "$1")"
+  raw_slug="$2"
+  repo_path="$(require_clone_path "$repo_name")"
+  require_clean_repo "$repo_path"
+  require_repo_upstream "$repo_path"
+
+  default_branch="$(repo_default_branch "$repo_path")" \
+    || die "cannot determine origin/HEAD for $repo_path"
+  base_ref="origin/$default_branch"
+  branch_name="$(codex_branch_name "$raw_slug")"
+  worktree_name="$(codex_worktree_name "$repo_name" "$raw_slug" "$(date +%Y%m%d)")"
+  worktree_path="$WORKTREES_DIR/$worktree_name"
+  manifest_path="$(codex_manifest_path "$TASKS_DIR" "$repo_name" "$raw_slug")"
+  repo_slug="$(repo_slug_from_path "$repo_path")" \
+    || die "missing origin remote for $repo_path"
+  bare_dir="$(repo_bare_dir "$repo_path")" \
+    || die "cannot resolve bare repo for $repo_path"
+
+  if [[ -e "$manifest_path" ]]; then
+    die "manifest already exists: $manifest_path"
+  fi
+
+  mkdir -p "$WORKTREES_DIR"
+  git -C "$bare_dir" fetch --quiet origin
+  repo_add_worktree "$repo_path" "$worktree_path" "$branch_name" "$base_ref"
+  git -C "$worktree_path" branch --unset-upstream >/dev/null 2>&1 || true
+  write_manifest "$manifest_path" "$repo_name" "$worktree_path" "$branch_name" "$default_branch" "$repo_slug"
+
+  echo "created codex task"
+  print_worker_prompt "$repo_name" "$worktree_path" "$branch_name" "$manifest_path"
+}
+
+status_cmd() {
+  local repo_name raw_slug manifest_path worktree_path branch base status created_at repo_slug
+  local current_branch upstream ahead behind anomalies=0
+
+  [[ $# -eq 2 ]] || die "usage: codex-task.sh status <repo> <task-slug>"
+  repo_name="$(normalize_repo_name "$1")"
+  raw_slug="$2"
+  manifest_path="$(load_manifest "$repo_name" "$raw_slug")"
+  worktree_path="$(manifest_field "$manifest_path" worktree)"
+  branch="$(manifest_field "$manifest_path" branch)"
+  base="$(manifest_field "$manifest_path" base)"
+  status="$(manifest_field "$manifest_path" status)"
+  created_at="$(manifest_field "$manifest_path" created_at)"
+  repo_slug="$(manifest_field "$manifest_path" repo_slug)"
+
+  echo "manifest:   $manifest_path"
+  echo "repo:       $repo_name"
+  echo "repo_slug:  $repo_slug"
+  echo "worktree:   $worktree_path"
+  echo "branch:     $branch"
+  echo "base:       $base"
+  echo "status:     $status"
+  echo "created_at: $created_at"
+
+  if [[ ! -e "$worktree_path/.git" ]]; then
+    echo "anomaly: missing worktree: $worktree_path" >&2
+    return 1
+  fi
+
+  current_branch="$(repo_current_branch "$worktree_path" || true)"
+  upstream="$(repo_upstream_ref "$worktree_path" || true)"
+  ahead="$(repo_ahead_count "$worktree_path")"
+  behind="$(repo_behind_count "$worktree_path")"
+
+  echo "current_branch: $current_branch"
+  echo "upstream:       ${upstream:-<none>}"
+  echo "dirty:          $(if repo_is_dirty "$worktree_path"; then echo yes; else echo no; fi)"
+  echo "ahead:          $ahead"
+  echo "behind:         $behind"
+
+  if [[ "$current_branch" != "$branch" ]]; then
+    echo "anomaly: current branch does not match manifest branch" >&2
+    anomalies=1
+  fi
+  if ! repo_branch_exists "$worktree_path" "$branch"; then
+    echo "anomaly: branch not found in bare repo: $branch" >&2
+    anomalies=1
+  fi
+
+  [[ "$anomalies" -eq 0 ]]
+}
+
+pr_cmd() {
+  local repo_name raw_slug manifest_path worktree_path branch base repo_slug
+  local title="" body="" body_file="" has_title=0 has_body=0
+  local extra_args=() commits tmp_body upstream
+
+  [[ $# -ge 2 ]] || die "usage: codex-task.sh pr <repo> <task-slug> [gh pr create args...]"
+  repo_name="$(normalize_repo_name "$1")"
+  raw_slug="$2"
+  shift 2
+  manifest_path="$(load_manifest "$repo_name" "$raw_slug")"
+  worktree_path="$(manifest_field "$manifest_path" worktree)"
+  branch="$(manifest_field "$manifest_path" branch)"
+  base="$(manifest_field "$manifest_path" base)"
+  repo_slug="$(manifest_field "$manifest_path" repo_slug)"
+
+  [[ -e "$worktree_path/.git" ]] || die "missing worktree: $worktree_path"
+  [[ "$(repo_current_branch "$worktree_path")" == "$branch" ]] || die "current branch mismatch: expected $branch"
+  repo_is_dirty "$worktree_path" && die "worktree is dirty: $worktree_path"
+  upstream="$(repo_upstream_ref "$worktree_path" || true)"
+  [[ -n "$upstream" ]] || die "no upstream configured for $branch"$'\n'"hint: push the branch first with \"git -C $worktree_path push -u origin $branch\""
+
+  gh auth status >/dev/null 2>&1 || die "gh auth status failed"
+  verify_required_checks "$repo_slug" "$base" "$worktree_path"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --title)
+        has_title=1
+        title="${2:-}"
+        [[ -n "$title" ]] || die "--title requires a value"
+        extra_args+=("$1" "$2")
+        shift 2
+        ;;
+      --body)
+        has_body=1
+        body="${2:-}"
+        [[ -n "$body" ]] || die "--body requires a value"
+        extra_args+=("$1" "$2")
+        shift 2
+        ;;
+      --body-file)
+        has_body=1
+        body_file="${2:-}"
+        [[ -n "$body_file" ]] || die "--body-file requires a value"
+        extra_args+=("$1" "$2")
+        shift 2
+        ;;
+      *)
+        extra_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "$has_title" -eq 0 ]]; then
+    title="$repo_name: ${raw_slug//-/ }"
+  fi
+
+  tmp_body=''
+  if [[ "$has_body" -eq 0 ]]; then
+    commits="$(git -C "$worktree_path" log --format='- %s' "origin/$base..HEAD" 2>/dev/null || true)"
+    [[ -n "$commits" ]] || commits='- no new commits found'
+    tmp_body="$(mktemp)"
+    trap 'rm -f "$tmp_body"' RETURN
+    cat >"$tmp_body" <<EOF
+## Summary
+
+$commits
+
+## Verification
+
+- TODO: describe verification performed in $worktree_path
+EOF
+    extra_args+=(--body-file "$tmp_body")
+  fi
+
+  if [[ "$has_title" -eq 0 ]]; then
+    extra_args+=(--title "$title")
+  fi
+
+  (
+    cd "$worktree_path"
+    gh pr create --draft --base "$base" --head "$branch" "${extra_args[@]}"
+  )
+
+  update_manifest_status "$manifest_path" "pr_opened"
+  rm -f "$tmp_body"
+  trap - RETURN
+}
+
+cmd="${1:-}"
+[[ -n "$cmd" ]] || {
+  usage
+  exit 1
+}
+shift
+
+case "$cmd" in
+  start) start_cmd "$@" ;;
+  status) status_cmd "$@" ;;
+  pr) pr_cmd "$@" ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
