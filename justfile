@@ -731,6 +731,51 @@ refactor repo:
     echo "  5. moon check && moon test"; \
     echo "  6. commit + push + open PR"'
 
+# Run a Cloudflare demo workflow for a supported repo.
+_cloudflare-run repo action:
+  @bash -ceu 'set -euo pipefail; \
+    repo="$1"; \
+    action="$2"; \
+    case "$repo" in \
+      domainprocessschema.mbt) \
+        path="{{REPOS_DIR}}/domainprocessschema.mbt"; \
+        item="domainprocessschema-cloudflare-dev"; \
+        ;; \
+      vizprocess.mbt) \
+        path="{{REPOS_DIR}}/vizprocess.mbt"; \
+        item="vizprocess-cloudflare-dev"; \
+        ;; \
+      *) \
+        echo "unsupported repo for Cloudflare workflow: $repo" >&2; \
+        echo "supported: domainprocessschema.mbt, vizprocess.mbt" >&2; \
+        exit 1; \
+        ;; \
+    esac; \
+    if [[ ! -e "$path/.git" ]]; then \
+      echo "missing clone: $path" >&2; \
+      exit 1; \
+    fi; \
+    cd "$path"; \
+    just "$action" "$item"' -- "{{repo}}" "{{action}}"
+
+cloudflare-op-create repo:
+  just _cloudflare-run "{{repo}}" demo-op-create
+
+cloudflare-op-env repo:
+  just _cloudflare-run "{{repo}}" demo-op-env
+
+cloudflare-build repo:
+  just _cloudflare-run "{{repo}}" demo-build
+
+cloudflare-dev repo:
+  just _cloudflare-run "{{repo}}" demo-dev
+
+cloudflare-deploy-preview repo:
+  just _cloudflare-run "{{repo}}" demo-deploy-preview
+
+cloudflare-deploy repo:
+  just _cloudflare-run "{{repo}}" demo-deploy
+
 # Run moon test for a single repo under ./repos
 moon-test repo:
   moon -C "{{REPOS_DIR}}/{{repo}}" test
