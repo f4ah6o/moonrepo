@@ -75,6 +75,12 @@ monorepo ではありません。
    - `just refactor <repo>` で環境検証と次手順の出力
    - 出力に従って `refactor/<date>` ブランチを切り、codex/claude で skill を起動
    - skill が指示する順序（architecture -> API 棚卸し -> 最小差分 -> tests/docs -> `moon check`/`moon test`）で進める
+15. Document の監査・改善（`docs-humanizer` skill 経由）
+   - `just docs-audit <repo>` で tracked documents を機械監査する
+   - `just docs-audit-all` で全 active repo を一括監査する
+   - `just docs-review <repo> <task-slug>` で codex worktree を作り、`docs-humanizer` skill を使う worker 向け手順を出力する
+   - 対象は `README*`, `AGENTS.md`, `CLAUDE.md`, `docs/**/*.md`, `issues/**/*.md` を含む tracked `.md` / `.mdx` / `.txt` / `.rst` / `.adoc`
+   - audit は機械検査で拾える AI っぽい文体だけを報告する。最終判断は skill のチェックリストに沿って行う
 
 ## Codex sub agent 運用
 
@@ -85,6 +91,7 @@ monorepo ではありません。
 - 状態確認は `just codex-status <repo> <task-slug>`、draft PR 作成は `just codex-pr <repo> <task-slug>` を使う
 - `AGENTS.md` や skill だけで sub agent 利用を絶対証明することはできない。実効強制は moonrepo の入口 command を通した運用で担保する
 - `just refactor <repo>` は MoonBit refactoring 専用の軽量入口として残すが、通常の repo 実装作業は `codex-start` を優先する
+- document 改善は `docs-review` を入口にし、worker は moonrepo workspace 上の `docs-humanizer` skill を使って対象 worktree を編集する
 
 ## 一括実行コマンド
 

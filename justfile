@@ -796,6 +796,38 @@ cloudflare-deploy repo:
 moon-test repo:
   moon -C "{{REPOS_DIR}}/{{repo}}" test
 
+# Audit tracked documents in a single repo for AI-like writing patterns.
+# Example: just docs-audit mhx.mbt
+docs-audit repo:
+  @REPOS_DIR="{{REPOS_DIR}}" bash .agents/skills/docs-humanizer/scripts/audit-docs.sh "{{repo}}"
+
+# Audit tracked documents across all active repos.
+# Example: just docs-audit-all
+docs-audit-all:
+  @bash -ceu 'set -euo pipefail; \
+    ok=0; missing=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -e "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      echo "audit: $repo"; \
+      if REPOS_DIR="{{REPOS_DIR}}" bash .agents/skills/docs-humanizer/scripts/audit-docs.sh "$name"; then \
+        ok=$((ok + 1)); \
+      else \
+        failed=$((failed + 1)); \
+      fi; \
+      echo ""; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
+
+# Start a docs-improvement worktree and print the docs-humanizer workflow.
+# Example: just docs-review mhx.mbt docs-pass
+docs-review repo task:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash .agents/skills/docs-humanizer/scripts/docs-workflow.sh "{{repo}}" "{{task}}"
+
 # Migrate GitHub Issues to local issues/ directory for a single repo
 # Example: just issues-migrate mhx.mbt
 # Example: just issues-migrate mhx.mbt --force --dry-run
