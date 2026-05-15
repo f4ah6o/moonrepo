@@ -4,6 +4,8 @@ skills/
 !.agents/skills/
 .DS_Store
 .claude/worktrees/
+.claude/tasks/
+.wrangler/
 .codex/
 
 repository.ini
