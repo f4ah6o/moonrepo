@@ -1,4 +1,4 @@
 interface:
   display_name: "Tornado Repo Bootstrap"
   short_description: "Bootstrap tornado setup for repos in moonrepo"
-  default_prompt: "Use $tornado-repo-bootstrap to add tornado.json and just tornado recipes to repos/<repo> in moonrepo."
+  default_prompt: "Use $tornado-repo-bootstrap to add tornado.json and just tornado recipes to target-repos/<repo>.git/.wt/main in moonrepo."

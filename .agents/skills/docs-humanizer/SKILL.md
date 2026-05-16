@@ -1,13 +1,13 @@
 ---
 name: docs-humanizer
-description: Review and improve tracked documents in repos/<repo> with a Japanese anti-AI-writing checklist, a mechanical audit pass, and a codex worktree workflow. Use when editing README, AGENTS, CLAUDE, docs/, issues/, specs, or other repository documents managed from moonrepo.
+description: Review and improve tracked documents in target-repos/<repo>.git/.wt/main with a Japanese anti-AI-writing checklist, a mechanical audit pass, and a codex worktree workflow. Use when editing README, AGENTS, CLAUDE, docs/, issues/, specs, or other repository documents managed from moonrepo.
 ---
 
 # Docs Humanizer
 
 ## When To Use
 
-Use this skill when you want to inspect or rewrite documents under `repos/<repo>` so they read like deliberate human-written technical documentation instead of generic LLM output.
+Use this skill when you want to inspect or rewrite documents under `target-repos/<repo>.git/.wt/main` so they read like deliberate human-written technical documentation instead of generic LLM output.
 
 Typical targets:
 
@@ -20,7 +20,7 @@ Typical targets:
 ## Preconditions
 
 - Run from the `moonrepo` workspace.
-- Target repo exists at `repos/<repo_name>` or in a codex-created worktree under `worktrees/`.
+- Target repo exists at `target-repos/<repo_name>.git/.wt/main` or in a codex-created worktree under `target-repos/<repo>.git/.wt/codex/`.
 - Commands available: `bash`, `git`, `jq`, `rg`.
 
 ## Primary Commands
@@ -86,7 +86,7 @@ just docs-review <repo_name> <task-slug>
 
 ```bash
 bash .agents/skills/docs-humanizer/scripts/audit-docs.sh <repo_name>
-git -C repos/<repo_name> diff --stat
+git -C target-repos/<repo_name>.git/.wt/main diff --stat
 ```
 
 Expected: obvious mechanical findings are reduced, tracked document diffs stay intentional, and rewritten docs read as specific technical writing rather than generic AI prose.

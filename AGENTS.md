@@ -11,6 +11,7 @@ monorepo ではありません。
 
 - 必須コマンド
   - `gh`（`gh skill` 拡張を含む。skill 管理に使う）
+  - `git-wt`
   - `just`
   - `moon`
   - `moon-dst`
@@ -30,19 +31,19 @@ monorepo ではありません。
 
 ## Release Rule
 
-- `repos/aci-rs` のバージョンは CalVer `YYYY.M.Patch` を使う（例: `2026.3.0`）。
-- `repos/aci-rs` の release tag は `v<version>` 形式（例: `v2026.3.0`）。
+- `target-repos/aci-rs.git/.wt/main` のバージョンは CalVer `YYYY.M.Patch` を使う（例: `2026.3.0`）。
+- `target-repos/aci-rs.git/.wt/main` の release tag は `v<version>` 形式（例: `v2026.3.0`）。
 
 ## 標準ワークフロー
 
 1. `just init <owner> --topics moonbit rust` で `repository.ini` を初期生成
 2. `--topics` 未指定時は `moonbit rust` が使われる
-3. `repository.ini` の有効行に `<owner>/<repo>` を1行ずつ記載（空行と `#` / `;` 行は無視）
-4. `just clone` で `./repos` に clone
+3. `repository.ini` の有効行に、今回 clone / 一括運用する `<owner>/<repo>` を1行ずつ記載（空行と `#` / `;` 行は無視）
+4. `just clone` で `./target-repos/<repo>.git` に bare clone し、`./target-repos/<repo>.git/.wt/main` を作る
 5. `just doctor` で前提コマンド・`repository.ini`・clone 状態を確認
 6. `just pull` で既存 active repo を更新
    - 全 clone を対象にしたい場合だけ `just --set REPO_SCOPE cloned pull`
-7. 余剰 clone の整理が必要なら `just repos-prune` / `just repos-prune --apply`
+7. 余剰 target repo の整理が必要なら `just target-repos-prune` / `just target-repos-prune --apply`
 8. topic migration
    - `just topics-migrate-moonbit`
    - `just topics-migrate-moonbit --apply`
@@ -94,8 +95,8 @@ monorepo ではありません。
 
 ## Codex sub agent 運用
 
-- `repos/<repo>` 配下の実装変更は `just codex-start <repo> <task-slug>` を入口にする
-- `just codex-start` は clone の clean 状態と upstream を確認し、`worktrees/<repo>-<task-slug>-<YYYYMMDD>/` と `codex/<task-slug>` branch、`.codex/tasks/<repo>-<task-slug>.json` manifest を作る
+- `target-repos/<repo>.git/.wt/main` 配下の実装変更は `just codex-start <repo> <task-slug>` を入口にする
+- `just codex-start` は `.wt/main` の clean 状態と upstream を確認し、`target-repos/<repo>.git/.wt/codex/<task-slug>/` と `codex/<task-slug>` branch、`.codex/tasks/<repo>-<task-slug>.json` manifest を作る
 - 親 thread は moonrepo 側に残り、対象 repo の実装は作成済み worktree を所有する Codex worker sub agent に任せる
 - 親 thread の責務は orchestration、最終 review、verification、push、draft PR 作成に限定する
 - 状態確認は `just codex-status <repo> <task-slug>`、draft PR 作成は `just codex-pr <repo> <task-slug>` を使う
@@ -125,4 +126,4 @@ monorepo ではありません。
   - `just gh-runs-last-all`
   - `just gh-runs-rerun-failed-all`
   - failed workflow の rerun は dry-run 既定
-  - `repos/` 全削除は `just --set FORCE 1 clean` / `just --set FORCE 1 cclone`
+  - `target-repos/` 全削除は `just --set FORCE 1 clean` / `just --set FORCE 1 cclone`

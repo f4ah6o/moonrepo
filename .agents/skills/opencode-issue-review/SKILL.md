@@ -1,6 +1,6 @@
 ---
 name: opencode-issue-review
-description: Review and improve local issue documents with the opencode CLI until it returns LGTM. Use when refining `issues/**/*.md` in repos/<repo> or a moonrepo worktree through an external reviewer loop.
+description: Review and improve local issue documents with the opencode CLI until it returns LGTM. Use when refining `issues/**/*.md` in target-repos/<repo>.git/.wt/main or a moonrepo codex worktree through an external reviewer loop.
 ---
 
 # Opencode Issue Review
@@ -13,7 +13,7 @@ Use this skill when you want to tighten issue or spec documents under `issues/` 
 - migrated GitHub issues need structure, acceptance criteria, or rationale
 - a repo already has local issue docs and you want an explicit `LGTM` gate before commit
 
-This skill is designed for the `moonrepo` layout and expects targets under `repos/<repo_name>` or `worktrees/<repo>-<task>-<date>`.
+This skill is designed for the `moonrepo` layout and expects targets under `target-repos/<repo_name>.git/.wt/main` or `target-repos/<repo>.git/.wt/codex/<task-slug>`.
 
 ## Preconditions
 

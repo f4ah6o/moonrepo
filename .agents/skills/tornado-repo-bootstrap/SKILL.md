@@ -1,24 +1,24 @@
 ---
 name: tornado-repo-bootstrap
-description: Add a standard tornado development setup to repos/<repo> in moonrepo by creating tornado.json and adding justfile recipes (just tornado, just tornado-validate) for dev=claude-code via opz z.ai and review=codex.
+description: Add a standard tornado development setup to target-repos/<repo>.git/.wt/main in moonrepo by creating tornado.json and adding justfile recipes (just tornado, just tornado-validate) for dev=claude-code via opz z.ai and review=codex.
 ---
 
 # Tornado Repo Bootstrap
 
 ## When To Use
 
-Use this skill when you want to enable the same tornado workflow in a target repository under `repos/`:
+Use this skill when you want to enable the same tornado workflow in a target repository under `target-repos/`:
 
 - add `tornado.json`
 - add `just tornado`
 - add `just tornado-validate`
 
-This skill is designed for `moonrepo` layout and expects a target path like `repos/FWD.mbt`.
+This skill is designed for `moonrepo` layout and expects a target path like `target-repos/FWD.mbt.git/.wt/main`.
 
 ## Preconditions
 
 - Run from the `moonrepo` workspace.
-- Target repo exists at `repos/<repo_name>`.
+- Target repo exists at `target-repos/<repo_name>.git/.wt/main`.
 - Target repo has a `justfile`.
 - Commands available in environment: `bash`, `rg`, `tornado`, `opz`, `just`.
 
@@ -61,7 +61,7 @@ bash .agents/skills/tornado-repo-bootstrap/scripts/enable_tornado_repo.sh FWD.mb
 ## Validate After Apply
 
 ```bash
-cd repos/<repo_name>
+cd target-repos/<repo_name>.git/.wt/main
 just --list
 just tornado-validate
 ```

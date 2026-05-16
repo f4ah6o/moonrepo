@@ -2,14 +2,15 @@
 set -euo pipefail
 
 # migrate-issues.sh - Migrate GitHub Issues to local issues/ directory
-# Usage: bash migrate-issues.sh <repo_name> [--force] [--dry-run] [--skip-agents] [--skip-readme] [--skip-close]
+# Usage: bash migrate-issues.sh <repo_name>|--path <repo_path> [--force] [--dry-run] [--skip-agents] [--skip-readme] [--skip-close]
 
 usage() {
   cat <<'EOF'
-Usage: migrate-issues.sh <repo_name> [options]
+Usage: migrate-issues.sh <repo_name>|--path <repo_path> [options]
 
 Options:
   --force          Overwrite existing issue files
+  --path PATH      Use an explicit repo/worktree path
   --dry-run        Show planned changes without writing or closing
   --skip-agents    Skip updating AGENTS.md / CLAUDE.md
   --skip-readme    Skip updating README.md
@@ -26,6 +27,7 @@ EOF
 
 # --- argument parsing ---
 REPO_NAME=""
+REPO_PATH=""
 FORCE=0
 DRY_RUN=0
 SKIP_AGENTS=0
@@ -36,6 +38,14 @@ while (($# > 0)); do
   case "$1" in
     -h|--help) usage ;;
     --force) FORCE=1 ;;
+    --path)
+      shift
+      if [[ -z "${1:-}" ]]; then
+        echo "--path requires a value" >&2
+        exit 1
+      fi
+      REPO_PATH="$1"
+      ;;
     --dry-run) DRY_RUN=1 ;;
     --skip-agents) SKIP_AGENTS=1 ;;
     --skip-readme) SKIP_README=1 ;;
@@ -56,12 +66,14 @@ while (($# > 0)); do
   shift
 done
 
-if [[ -z "$REPO_NAME" ]]; then
+if [[ -z "$REPO_NAME" && -z "$REPO_PATH" ]]; then
   echo "missing repo name" >&2
   usage
 fi
 
-REPO_PATH="repos/${REPO_NAME}"
+if [[ -z "$REPO_PATH" ]]; then
+  REPO_PATH="target-repos/${REPO_NAME}.git/.wt/main"
+fi
 if [[ ! -d "$REPO_PATH" ]]; then
   echo "repo path not found: $REPO_PATH" >&2
   exit 1

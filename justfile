@@ -1,7 +1,7 @@
 set shell := ["bash", "-cu"]
 
 REPO_LIST := "repository.ini"
-REPOS_DIR := "repos"
+REPOS_DIR := "target-repos"
 REPO_SCOPE := "active"
 FORCE := "0"
 
@@ -65,7 +65,7 @@ init owner *args:
     { \
       echo "; <owner>/<repo> を1行ずつ書く（空行と ; 行は無視）"; \
       echo "; 生成コマンド: just init $owner --topics $topics"; \
-      echo "; 初期生成時はすべてコメントアウトされるので、必要なものだけ有効化する"; \
+      echo "; 初期生成時はすべてコメントアウトされるので、今回 clone / 一括運用する対象だけ有効化する"; \
       echo "; topic に一致した repo をコメントアウトで出力する"; \
       echo "; 例:"; \
       while IFS= read -r name; do \
@@ -76,24 +76,31 @@ init owner *args:
     rm -f "$tmp"; \
       echo "generated {{REPO_LIST}} from $owner (topics: $topics)"' -- "{{owner}}" {{args}}
 
-# Clone repos from repository.ini into ./repos
+# Clone repos from repository.ini into ./target-repos as bare repos with .wt/main worktrees.
 clone:
   @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
     mkdir -p "{{REPOS_DIR}}"; \
     if [[ ! -f "{{REPO_LIST}}" ]]; then echo "missing {{REPO_LIST}}"; exit 1; fi; \
     while IFS=$'\''\t'\'' read -r repo name dest; do \
-      bare="{{REPOS_DIR}}/${name}.git"; \
+      bare="$(repo_bare_path_from_name "$name")"; \
       if [[ -d "$bare" && -e "$dest/.git" ]]; then echo "skip (exists): $repo -> $dest"; continue; fi; \
       if [[ ! -d "$bare" ]]; then \
         echo "clone --bare: $repo -> $bare"; \
         git clone --bare "https://github.com/${repo}.git" "$bare"; \
+        git -C "$bare" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"; \
+        git -C "$bare" fetch --quiet origin; \
         git -C "$bare" remote set-head origin --auto >/dev/null; \
       fi; \
+      git -C "$bare" config wt.basedir .wt; \
       if [[ ! -e "$dest/.git" ]]; then \
-        default_ref="$(git -C "$bare" symbolic-ref refs/remotes/origin/HEAD)"; \
+        default_ref="$(git -C "$bare" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || git -C "$bare" symbolic-ref HEAD)"; \
         default_branch="${default_ref#refs/remotes/origin/}"; \
+        default_branch="${default_branch#refs/heads/}"; \
         echo "worktree add: $dest @ $default_branch"; \
-        git -C "$bare" worktree add "../${name}" "$default_branch"; \
+        mkdir -p "$(dirname "$dest")"; \
+        dest_abs="$(cd "$(dirname "$dest")" && pwd)/$(basename "$dest")"; \
+        git -C "$bare" worktree add "$dest_abs" "$default_branch"; \
       fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh list active)'
 
@@ -118,7 +125,7 @@ clean:
 doctor:
   @bash -ceu 'set -euo pipefail; \
     missing=0; \
-    for cmd in gh just moon moon-dst jq; do \
+    for cmd in gh git-wt just moon moon-dst jq; do \
       if command -v "$cmd" >/dev/null 2>&1; then \
         echo "ok command: $cmd"; \
       else \
@@ -141,8 +148,12 @@ doctor:
       if [[ ! -e "$path/.git" ]]; then \
         echo "missing worktree: $repo -> $path" >&2; ok=0; \
       fi; \
+      wt_basedir="$(git -C "$bare" config --get wt.basedir 2>/dev/null || true)"; \
+      if [[ -d "$bare" && "$wt_basedir" != ".wt" ]]; then \
+        echo "missing wt.basedir=.wt: $repo -> $bare" >&2; ok=0; \
+      fi; \
       if [[ "$ok" -eq 1 ]]; then \
-        echo "ok active clone: $repo"; \
+        echo "ok active target repo: $repo"; \
       else \
         active_missing=$((active_missing + 1)); \
       fi; \
@@ -164,7 +175,7 @@ doctor:
     echo "summary: missing=$missing active_missing=$active_missing extra_cloned=$extra_cloned"; \
     [[ "$missing" -eq 0 && "$active_missing" -eq 0 ]]'
 
-repos-prune *args:
+target-repos-prune *args:
   @bash -ceu 'set -euo pipefail; \
     apply=0; \
     source scripts/repo-lib.sh; \
@@ -215,6 +226,9 @@ repos-prune *args:
     echo "mode: $mode"; \
     echo "planned: $count"' -- {{args}}
 
+repos-prune *args:
+  @just target-repos-prune {{args}}
+
 # Pull updates for already cloned repos
 pull:
   @bash -ceu 'set -euo pipefail; \
@@ -261,7 +275,7 @@ push-all:
     echo "summary: ok=$ok missing=$missing failed=$failed"; \
     [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
-# Set git author config for all repos under ./repos
+# Set git author config for all target repo worktrees.
 config name email:
   @bash -ceu 'set -euo pipefail; \
     ok=0; missing=0; \
@@ -436,23 +450,18 @@ topics-add-from-ini topic *args:
 deps-scan-all *args:
   @bash -ceu 'set -euo pipefail; \
     source scripts/repo-lib.sh; \
-    missing=0; \
-    cmd=(moon-dst scan --root "{{REPOS_DIR}}"); \
+    ok=0; missing=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
       if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
+        continue; \
       fi; \
+      echo "deps scan: $repo"; \
+      if moon-dst scan --root "$path" "$@"; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
-    if [[ "{{REPO_SCOPE}}" == "active" ]]; then \
-      while IFS=$'\''\t'\'' read -r repo name path; do \
-        [[ -n "$name" ]] || continue; \
-        cmd+=(--ignore "$name"); \
-      done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
-    fi; \
-    if (($# > 0)); then cmd+=("$@"); fi; \
-    "${cmd[@]}"; \
-    [[ "$missing" -eq 0 ]]' -- {{args}}
+    echo "summary: ok=$ok missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
 
 # Apply dependency updates for all repos
 # Example: just deps-apply-all --dry-run
@@ -461,8 +470,7 @@ deps-scan-all *args:
 deps-apply-all *args:
   @bash -ceu 'set -euo pipefail; \
     source scripts/repo-lib.sh; \
-    missing=0; skipped_dirty=0; \
-    cmd=(moon-dst apply --root "{{REPOS_DIR}}"); \
+    ok=0; missing=0; skipped_dirty=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
       if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
@@ -471,20 +479,14 @@ deps-apply-all *args:
       fi; \
       if repo_is_dirty "$path"; then \
         echo "skip dirty: $repo"; \
-        cmd+=(--ignore "$name"); \
         skipped_dirty=$((skipped_dirty + 1)); \
+        continue; \
       fi; \
+      echo "deps apply: $repo"; \
+      if moon-dst apply --root "$path" "$@"; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
-    if [[ "{{REPO_SCOPE}}" == "active" ]]; then \
-      while IFS=$'\''\t'\'' read -r repo name path; do \
-        [[ -n "$name" ]] || continue; \
-        cmd+=(--ignore "$name"); \
-      done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
-    fi; \
-    if (($# > 0)); then cmd+=("$@"); fi; \
-    "${cmd[@]}"; \
-    echo "summary: skipped_dirty=$skipped_dirty missing=$missing"; \
-    [[ "$skipped_dirty" -eq 0 && "$missing" -eq 0 ]]' -- {{args}}
+    echo "summary: ok=$ok skipped_dirty=$skipped_dirty missing=$missing failed=$failed"; \
+    [[ "$skipped_dirty" -eq 0 && "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
 
 # Add justfile to all repos
 # Example: just deps-just-all --mode skip
@@ -492,8 +494,7 @@ deps-apply-all *args:
 deps-just-all *args:
   @bash -ceu 'set -euo pipefail; \
     source scripts/repo-lib.sh; \
-    missing=0; skipped_dirty=0; \
-    cmd=(moon-dst just --root "{{REPOS_DIR}}"); \
+    ok=0; missing=0; skipped_dirty=0; failed=0; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
       if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
@@ -502,38 +503,32 @@ deps-just-all *args:
       fi; \
       if repo_is_dirty "$path"; then \
         echo "skip dirty: $repo"; \
-        cmd+=(--ignore "$name"); \
         skipped_dirty=$((skipped_dirty + 1)); \
+        continue; \
       fi; \
+      echo "deps just: $repo"; \
+      if moon-dst just --root "$path" "$@"; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
-    if [[ "{{REPO_SCOPE}}" == "active" ]]; then \
-      while IFS=$'\''\t'\'' read -r repo name path; do \
-        [[ -n "$name" ]] || continue; \
-        cmd+=(--ignore "$name"); \
-      done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh extra-cloned); \
-    fi; \
-    if (($# > 0)); then cmd+=("$@"); fi; \
-    "${cmd[@]}"; \
-    echo "summary: skipped_dirty=$skipped_dirty missing=$missing"; \
-    [[ "$skipped_dirty" -eq 0 && "$missing" -eq 0 ]]' -- {{args}}
+    echo "summary: ok=$ok skipped_dirty=$skipped_dirty missing=$missing failed=$failed"; \
+    [[ "$skipped_dirty" -eq 0 && "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
 
-# Scan dependencies for one repo under ./repos
+# Scan dependencies for one target repo worktree.
 # Example: just deps-scan moonbit-lang-core
 
 deps-scan repo *args:
-  moon-dst scan --root "{{REPOS_DIR}}/{{repo}}" {{args}}
+  @bash -ceu 'source scripts/repo-lib.sh; moon-dst scan --root "$(repo_main_worktree_path_from_name "{{repo}}")" "$@"' -- {{args}}
 
-# Apply dependency updates for one repo under ./repos
+# Apply dependency updates for one target repo worktree.
 # Example: just deps-apply moonbit-lang-core --dry-run
 
 deps-apply repo *args:
-  moon-dst apply --root "{{REPOS_DIR}}/{{repo}}" {{args}}
+  @bash -ceu 'source scripts/repo-lib.sh; moon-dst apply --root "$(repo_main_worktree_path_from_name "{{repo}}")" "$@"' -- {{args}}
 
-# Add justfile to one repo under ./repos
+# Add justfile to one target repo worktree.
 # Example: just deps-just moonbit-lang-core --mode skip
 
 deps-just repo *args:
-  moon-dst just --root "{{REPOS_DIR}}/{{repo}}" {{args}}
+  @bash -ceu 'source scripts/repo-lib.sh; moon-dst just --root "$(repo_main_worktree_path_from_name "{{repo}}")" "$@"' -- {{args}}
 
 # Run moon fmt/check/build/clean for all repos (turbo-like)
 moon-fmt-all:
@@ -620,18 +615,18 @@ moon-clean-all:
     echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon missing=$missing failed=$failed"; \
     [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
-# Run moon fmt/check/build/clean for a single repo under ./repos
+# Run moon fmt/check/build/clean for a single target repo worktree.
 moon-fmt repo:
-  moon -C "{{REPOS_DIR}}/{{repo}}" fmt
+  @bash -ceu 'source scripts/repo-lib.sh; moon -C "$(repo_main_worktree_path_from_name "{{repo}}")" fmt'
 
 moon-check repo:
-  moon -C "{{REPOS_DIR}}/{{repo}}" check
+  @bash -ceu 'source scripts/repo-lib.sh; moon -C "$(repo_main_worktree_path_from_name "{{repo}}")" check'
 
 moon-build repo:
-  moon -C "{{REPOS_DIR}}/{{repo}}" build
+  @bash -ceu 'source scripts/repo-lib.sh; moon -C "$(repo_main_worktree_path_from_name "{{repo}}")" build'
 
 moon-clean repo:
-  moon -C "{{REPOS_DIR}}/{{repo}}" clean
+  @bash -ceu 'source scripts/repo-lib.sh; moon -C "$(repo_main_worktree_path_from_name "{{repo}}")" clean'
 
 # Run moon test for all repos (turbo-like)
 moon-test-all:
@@ -708,9 +703,9 @@ refactor repo:
     source scripts/repo-lib.sh; \
     name="{{repo}}"; \
     name="${name##*/}"; \
-    path="{{REPOS_DIR}}/$name"; \
+    path="$(repo_main_worktree_path_from_name "$name")"; \
     if [[ ! -e "$path/.git" ]]; then \
-      echo "missing clone: $path" >&2; \
+      echo "missing worktree: $path" >&2; \
       echo "hint: add to {{REPO_LIST}} and run \"just clone\"" >&2; \
       exit 1; \
     fi; \
@@ -754,11 +749,11 @@ _cloudflare-run repo action:
     action="$2"; \
     case "$repo" in \
       domainprocessschema.mbt) \
-        path="{{REPOS_DIR}}/domainprocessschema.mbt"; \
+        source scripts/repo-lib.sh; path="$(repo_main_worktree_path_from_name "domainprocessschema.mbt")"; \
         item="domainprocessschema-cloudflare-dev"; \
         ;; \
       vizprocess.mbt) \
-        path="{{REPOS_DIR}}/vizprocess.mbt"; \
+        source scripts/repo-lib.sh; path="$(repo_main_worktree_path_from_name "vizprocess.mbt")"; \
         item="vizprocess-cloudflare-dev"; \
         ;; \
       *) \
@@ -768,7 +763,7 @@ _cloudflare-run repo action:
         ;; \
     esac; \
     if [[ ! -e "$path/.git" ]]; then \
-      echo "missing clone: $path" >&2; \
+      echo "missing worktree: $path" >&2; \
       exit 1; \
     fi; \
     cd "$path"; \
@@ -792,14 +787,14 @@ cloudflare-deploy-preview repo:
 cloudflare-deploy repo:
   just _cloudflare-run "{{repo}}" demo-deploy
 
-# Run moon test for a single repo under ./repos
+# Run moon test for a single target repo worktree.
 moon-test repo:
-  moon -C "{{REPOS_DIR}}/{{repo}}" test
+  @bash -ceu 'source scripts/repo-lib.sh; moon -C "$(repo_main_worktree_path_from_name "{{repo}}")" test'
 
 # Audit tracked documents in a single repo for AI-like writing patterns.
 # Example: just docs-audit mhx.mbt
 docs-audit repo:
-  @REPOS_DIR="{{REPOS_DIR}}" bash .agents/skills/docs-humanizer/scripts/audit-docs.sh "{{repo}}"
+  @bash -ceu 'source scripts/repo-lib.sh; bash .agents/skills/docs-humanizer/scripts/audit-docs.sh --path "$(repo_main_worktree_path_from_name "{{repo}}")"'
 
 # Audit tracked documents across all active repos.
 # Example: just docs-audit-all
@@ -813,7 +808,7 @@ docs-audit-all:
         continue; \
       fi; \
       echo "audit: $repo"; \
-      if REPOS_DIR="{{REPOS_DIR}}" bash .agents/skills/docs-humanizer/scripts/audit-docs.sh "$name"; then \
+      if bash .agents/skills/docs-humanizer/scripts/audit-docs.sh --path "$path"; then \
         ok=$((ok + 1)); \
       else \
         failed=$((failed + 1)); \
@@ -842,7 +837,7 @@ cgz-affected path *files:
 # Example: just issues-migrate mhx.mbt
 # Example: just issues-migrate mhx.mbt --force --dry-run
 issues-migrate repo *args:
-  @bash .agents/skills/issues-migrate/scripts/migrate-issues.sh "{{repo}}" {{args}}
+  @bash -ceu 'source scripts/repo-lib.sh; bash .agents/skills/issues-migrate/scripts/migrate-issues.sh --path "$(repo_main_worktree_path_from_name "{{repo}}")" "$@"' -- {{args}}
 
 # Migrate GitHub Issues to local issues/ directory for all active repos
 # Example: just issues-migrate-all
@@ -858,7 +853,7 @@ issues-migrate-all *args:
         continue; \
       fi; \
       echo "migrate: $repo"; \
-      if bash .agents/skills/issues-migrate/scripts/migrate-issues.sh "$name" {{args}}; then \
+      if bash .agents/skills/issues-migrate/scripts/migrate-issues.sh --path "$path" {{args}}; then \
         ok=$((ok + 1)); \
       else \
         failed=$((failed + 1)); \

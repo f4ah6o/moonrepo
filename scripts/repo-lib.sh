@@ -2,8 +2,9 @@
 set -euo pipefail
 
 REPO_LIST="${REPO_LIST:-repository.ini}"
-REPOS_DIR="${REPOS_DIR:-repos}"
+REPOS_DIR="${REPOS_DIR:-target-repos}"
 REPO_SCOPE="${REPO_SCOPE:-active}"
+DEFAULT_WORKTREE_NAME="${DEFAULT_WORKTREE_NAME:-main}"
 
 trim_line() {
   printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
@@ -97,11 +98,26 @@ repo_bare_dir() {
   local dir="$1"
   local target
 
+  if [[ -d "$dir" && "$(basename "$dir")" == *.git ]]; then
+    printf '%s\n' "$dir"
+    return 0
+  fi
+
   target="$(repo_gitdir_path "$dir")" || return 1
   case "$target" in
     */worktrees/*) target="${target%/worktrees/*}" ;;
   esac
   printf '%s\n' "$target"
+}
+
+repo_bare_path_from_name() {
+  local name="$1"
+  printf '%s/%s.git\n' "$REPOS_DIR" "$name"
+}
+
+repo_main_worktree_path_from_name() {
+  local name="$1"
+  printf '%s/%s.git/.wt/%s\n' "$REPOS_DIR" "$name" "$DEFAULT_WORKTREE_NAME"
 }
 
 repo_is_moon() {
@@ -124,7 +140,11 @@ repo_default_branch() {
   local ref
 
   ref="$(git -C "$path" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if [[ -z "$ref" ]]; then
+    ref="$(git -C "$path" symbolic-ref HEAD 2>/dev/null || true)"
+  fi
   [[ -n "$ref" ]] || return 1
+  ref="${ref#refs/heads/}"
   printf '%s\n' "${ref#refs/remotes/origin/}"
 }
 
@@ -151,7 +171,11 @@ repo_worktree_exists() {
   local bare="$2"
   local candidate
 
-  candidate="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+  if [[ "$path" == /* ]]; then
+    candidate="$path"
+  else
+    candidate="$(pwd)/$path"
+  fi
   git -C "$bare" worktree list --porcelain \
     | awk '/^worktree / {sub(/^worktree /, ""); print}' \
     | grep -Fxq "$candidate"
@@ -223,6 +247,7 @@ repo_add_worktree() {
   local branch="$3"
   local base_ref="$4"
   local bare
+  local worktree_abs
 
   bare="$(repo_bare_dir "$repo_path")" || return 1
   if [[ -e "$worktree_path" ]]; then
@@ -242,7 +267,8 @@ repo_add_worktree() {
     return 1
   fi
   mkdir -p "$(dirname "$worktree_path")"
-  git -C "$bare" worktree add -b "$branch" "$worktree_path" "$base_ref"
+  worktree_abs="$(cd "$(dirname "$worktree_path")" && pwd)/$(basename "$worktree_path")"
+  git -C "$bare" worktree add -b "$branch" "$worktree_abs" "$base_ref"
 }
 
 list_active_repo_entries() {
@@ -268,57 +294,44 @@ list_active_repo_entries() {
       }
       name = line
       sub(/^.*\//, "", name)
-      printf "%s\t%s\t%s/%s\n", line, name, repos_dir, name
+      printf "%s\t%s\t%s/%s.git/.wt/%s\n", line, name, repos_dir, name, default_worktree
     }
     END {
       if (invalid) {
         exit 1
       }
     }
-  ' repos_dir="$REPOS_DIR" "$REPO_LIST"
+  ' repos_dir="$REPOS_DIR" default_worktree="$DEFAULT_WORKTREE_NAME" "$REPO_LIST"
 }
 
 list_cloned_repo_entries() {
-  local dir base name repo slug
-
-  shopt -s nullglob
-  for dir in "$REPOS_DIR"/*; do
-    [[ -d "$dir" ]] || continue
-    base="$(basename "$dir")"
-    [[ "$base" == *.git ]] && continue
-    [[ -e "$dir/.git" ]] || continue
-    if ! name="$(repo_bare_name "$dir" 2>/dev/null)"; then
-      name="$base"
-    fi
-    repo="$name"
-    if slug="$(repo_slug_from_path "$dir" 2>/dev/null)"; then
-      repo="$slug"
-    fi
-    printf '%s\t%s\t%s\n' "$repo" "$name" "$dir"
-  done | sort
-}
-
-list_orphan_bare_entries() {
-  local bare base name repo slug dir wname has_worktree
+  local bare base name repo slug path
 
   shopt -s nullglob
   for bare in "$REPOS_DIR"/*.git; do
     [[ -d "$bare" ]] || continue
     base="$(basename "$bare")"
     name="${base%.git}"
-    has_worktree=0
-    for dir in "$REPOS_DIR"/*; do
-      [[ -d "$dir" ]] || continue
-      [[ "$(basename "$dir")" == *.git ]] && continue
-      [[ -e "$dir/.git" ]] || continue
-      if wname="$(repo_bare_name "$dir" 2>/dev/null)"; then
-        if [[ "$wname" == "$name" ]]; then
-          has_worktree=1
-          break
-        fi
-      fi
-    done
-    [[ "$has_worktree" -eq 1 ]] && continue
+    path="$bare/.wt/$DEFAULT_WORKTREE_NAME"
+    [[ -e "$path/.git" ]] || continue
+    repo="$name"
+    if slug="$(repo_slug_from_path "$path" 2>/dev/null)"; then
+      repo="$slug"
+    fi
+    printf '%s\t%s\t%s\n' "$repo" "$name" "$path"
+  done | sort
+}
+
+list_orphan_bare_entries() {
+  local bare base name repo slug path
+
+  shopt -s nullglob
+  for bare in "$REPOS_DIR"/*.git; do
+    [[ -d "$bare" ]] || continue
+    base="$(basename "$bare")"
+    name="${base%.git}"
+    path="$bare/.wt/$DEFAULT_WORKTREE_NAME"
+    [[ -e "$path/.git" ]] && continue
     repo="$name"
     if slug="$(repo_slug_from_path "$bare" 2>/dev/null)"; then
       repo="$slug"

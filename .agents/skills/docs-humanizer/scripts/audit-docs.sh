@@ -9,7 +9,7 @@ Usage:
 
 Examples:
   bash .agents/skills/docs-humanizer/scripts/audit-docs.sh mhx.mbt
-  bash .agents/skills/docs-humanizer/scripts/audit-docs.sh --path worktrees/mhx.mbt-docs-20260508
+  bash .agents/skills/docs-humanizer/scripts/audit-docs.sh --path target-repos/mhx.mbt.git/.wt/codex/docs-pass
 EOF
 }
 

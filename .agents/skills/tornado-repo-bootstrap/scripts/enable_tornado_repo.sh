@@ -97,7 +97,7 @@ done
 [[ -n "$review_model" ]] || die "--review-model must not be empty"
 is_positive_integer "$max_review_cycles" || die "--max-review-cycles must be a positive integer"
 
-target_dir="${REPO_ROOT}/repos/${repo_name}"
+target_dir="${REPO_ROOT}/target-repos/${repo_name}.git/.wt/main"
 justfile="${target_dir}/justfile"
 tornado_json="${target_dir}/tornado.json"
 config_template="${SKILL_DIR}/references/config-template.json"

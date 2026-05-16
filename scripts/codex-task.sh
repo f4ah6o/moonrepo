@@ -7,7 +7,6 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 source "$script_dir/repo-lib.sh"
 
 TASKS_DIR="${TASKS_DIR:-$repo_root/.codex/tasks}"
-WORKTREES_DIR="${WORKTREES_DIR:-$repo_root/worktrees}"
 
 usage() {
   cat <<'EOF' >&2
@@ -31,7 +30,7 @@ normalize_repo_name() {
 
 repo_path_from_name() {
   local name="$1"
-  printf '%s/%s\n' "$REPOS_DIR" "$name"
+  repo_main_worktree_path_from_name "$name"
 }
 
 require_clone_path() {
@@ -40,7 +39,7 @@ require_clone_path() {
 
   path="$(repo_path_from_name "$repo_name")"
   if [[ ! -e "$path/.git" ]]; then
-    die "missing clone: $path"$'\n'"hint: add to $REPO_LIST and run \"just clone\""
+    die "missing worktree: $path"$'\n'"hint: add to $REPO_LIST and run \"just clone\""
   fi
   printf '%s\n' "$path"
 }
@@ -214,7 +213,7 @@ start_cmd() {
   base_ref="origin/$default_branch"
   branch_name="$(codex_branch_name "$raw_slug")"
   worktree_name="$(codex_worktree_name "$repo_name" "$raw_slug" "$(date +%Y%m%d)")"
-  worktree_path="$WORKTREES_DIR/$worktree_name"
+  worktree_path="$bare_dir/.wt/codex/$(codex_normalize_task_slug "$raw_slug")"
   manifest_path="$(codex_manifest_path "$TASKS_DIR" "$repo_name" "$raw_slug")"
   repo_slug="$(repo_slug_from_path "$repo_path")" \
     || die "missing origin remote for $repo_path"
@@ -225,8 +224,12 @@ start_cmd() {
     die "manifest already exists: $manifest_path"
   fi
 
-  mkdir -p "$WORKTREES_DIR"
+  git -C "$bare_dir" config wt.basedir .wt
+  git -C "$bare_dir" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
   git -C "$bare_dir" fetch --quiet origin
+  if ! git -C "$bare_dir" show-ref --verify --quiet "refs/remotes/origin/$default_branch"; then
+    base_ref="$default_branch"
+  fi
   repo_add_worktree "$repo_path" "$worktree_path" "$branch_name" "$base_ref"
   git -C "$worktree_path" branch --unset-upstream >/dev/null 2>&1 || true
   write_manifest "$manifest_path" "$repo_name" "$worktree_path" "$branch_name" "$default_branch" "$repo_slug"

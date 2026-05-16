@@ -1,6 +1,6 @@
 ---
 name: issues-migrate
-description: Migrate GitHub Issues to a local issues/ directory in repos/<repo> following the shiguredo/http3-rs convention (timestamp-based naming). Use when migrating issues from GitHub to local markdown files.
+description: Migrate GitHub Issues to a local issues/ directory in target-repos/<repo>.git/.wt/main following the shiguredo/http3-rs convention (timestamp-based naming). Use when migrating issues from GitHub to local markdown files.
 ---
 
 # Issues Migrate
@@ -16,12 +16,12 @@ Use this skill when you want to migrate GitHub Issues into a local `issues/` dir
 - Update `README.md` with reference to shiguredo/http3-rs
 - Close the migrated issues on GitHub (with a migration comment)
 
-This skill is designed for `moonrepo` layout and expects a target path like `repos/mhx.mbt`.
+This skill is designed for `moonrepo` layout and expects a target path like `target-repos/mhx.mbt.git/.wt/main`.
 
 ## Preconditions
 
 - Run from the `moonrepo` workspace.
-- Target repo exists at `repos/<repo_name>` and has a `.git` directory.
+- Target repo exists at `target-repos/<repo_name>.git/.wt/main` and has a `.git` directory.
 - `gh` CLI is authenticated and available.
 - Commands available: `bash`, `gh`, `jq`.
 
@@ -74,7 +74,7 @@ bash .agents/skills/issues-migrate/scripts/migrate-issues.sh mhx.mbt
 ## Validate After Apply
 
 ```bash
-cd repos/<repo_name>
+cd target-repos/<repo_name>.git/.wt/main
 ls issues/
 ls issues/closed/
 git status

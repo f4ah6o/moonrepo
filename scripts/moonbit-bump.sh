@@ -6,7 +6,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/repo-lib.sh"
 
 OWNER="${OWNER:-f4ah6o}"
-REPOS_DIR="${REPOS_DIR:-repos}"
+REPOS_DIR="${REPOS_DIR:-target-repos}"
 APPLY="${APPLY:-0}"
 VERSION="${VERSION:-}"
 
@@ -18,7 +18,7 @@ Usage:
 
 Env:
   OWNER      GitHub owner (default: f4ah6o)
-  REPOS_DIR  Local clones dir (default: repos)
+  REPOS_DIR  Bare target repos dir (default: target-repos)
 EOF
 }
 
@@ -181,11 +181,11 @@ fi
 
 for name in "${names[@]}"; do
   [[ -n "$name" ]] || continue
-  path="$REPOS_DIR/$name"
+  path="$(REPOS_DIR="$REPOS_DIR" repo_main_worktree_path_from_name "$name")"
   slug="$OWNER/$name"
 
   if [[ ! -e "$path/.git" ]]; then
-    echo "missing clone: $slug -> $path" >&2
+    echo "missing worktree: $slug -> $path" >&2
     missing_clone=$((missing_clone + 1))
     continue
   fi
