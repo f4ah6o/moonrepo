@@ -86,6 +86,11 @@ monorepo ではありません。
    - read-only helper: `just cgz-status <path>` / `just cgz-context <path> <task>` / `just cgz-affected <path> <files...>`
    - helper は `.codegraph/` を初期化・更新しない。必要な場合だけ対象 repo で明示的に `cgz init -i <path>` / `cgz index <path>` を実行する
    - `cgz` の変更希望は `../codegraph/issues/` にローカル issue として作成する
+17. `dwiki` で低トークンな repo 概要調査を行う（`dwiki-workflow` skill 経由）
+   - `dwiki` は任意のインストール済み CLI として扱う。`just doctor` の必須前提には含めない
+   - 使う前に `command -v dwiki` と `dwiki check <owner>/<repo> --output json` で利用可否を確認する
+   - `dwiki read/ask/search ... --output json | jq -r .result` で必要部分だけ読む
+   - `dwiki` の出力は調査の入口として扱い、実装や結論の前に local file で確認する
 
 ## Codex sub agent 運用
 

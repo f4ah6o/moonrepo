@@ -136,6 +136,20 @@ just cgz-affected <path> <files...>
 
 これらは read-only helper です。`.codegraph/` の初期化や更新が必要な場合は、対象 repo で明示的に `cgz init -i <path>` や `cgz index <path>` を実行してください。
 
+10. `dwiki` で repo 概要を低トークンに調べる場合
+
+repo local skill `dwiki-workflow` を使います。`dwiki` は任意のインストール済み CLI として扱い、moonrepo の必須コマンドには含めません。
+
+```sh
+command -v dwiki
+dwiki check <owner>/<repo> --output json
+dwiki read <owner>/<repo> --output json | jq -r .result
+dwiki ask <owner>/<repo> "Where is request routing implemented?" --output json | jq -r .result
+dwiki search <owner>/<repo> "SessionStore" --output json | jq -r .result
+```
+
+`dwiki` の結果は概要把握と候補ファイル探しに使います。実装変更や調査結論は、対象 repo の local file を読んで確認してください。
+
 ## よく使うコマンド
 
 - 前提と対象状態の確認
@@ -188,6 +202,9 @@ just cgz-affected <path> <files...>
   - `just cgz-context <path> <task>`
   - `just cgz-affected <path> <files...>`
   - repo local skill `cgz-workflow` を使い、インストール済み `cgz` CLI を read-only な探索・影響確認に使います。
+- `dwiki` overview helper
+  - repo local skill `dwiki-workflow` を使い、`dwiki check/read/ask/search` で概要や候補ファイルを低トークンに調べます。
+  - `dwiki` は任意コマンドなので、未インストール時は通常の local file 探索に戻ります。
 
 ## 詳細
 
