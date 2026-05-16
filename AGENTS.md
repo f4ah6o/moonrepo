@@ -81,6 +81,11 @@ monorepo ではありません。
    - `just docs-review <repo> <task-slug>` で codex worktree を作り、`docs-humanizer` skill を使う worker 向け手順を出力する
    - 対象は `README*`, `AGENTS.md`, `CLAUDE.md`, `docs/**/*.md`, `issues/**/*.md` を含む tracked `.md` / `.mdx` / `.txt` / `.rst` / `.adoc`
    - audit は機械検査で拾える AI っぽい文体だけを報告する。最終判断は skill のチェックリストに沿って行う
+16. `cgz` を開発補助に使う（`cgz-workflow` skill 経由）
+   - `cgz` はインストール済み CLI として扱う。moonrepo は `codegraph` repo を clone 対象として管理しない
+   - read-only helper: `just cgz-status <path>` / `just cgz-context <path> <task>` / `just cgz-affected <path> <files...>`
+   - helper は `.codegraph/` を初期化・更新しない。必要な場合だけ対象 repo で明示的に `cgz init -i <path>` / `cgz index <path>` を実行する
+   - `cgz` の変更希望は `../codegraph/issues/` にローカル issue として作成する
 
 ## Codex sub agent 運用
 

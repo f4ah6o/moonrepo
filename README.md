@@ -124,6 +124,18 @@ just docs-review <repo> <task-slug>
 
 `just docs-audit` は tracked documents を対象に、AI っぽい文体の機械検査を行います。`just docs-review` は `codex-start` で専用 worktree を作り、その worktree に対して `docs-humanizer` skill と audit の手順を出力します。
 
+9. `cgz` を開発補助に使う場合
+
+`cgz` はインストール済み CLI として扱います。moonrepo は `codegraph` リポジトリを clone 対象として管理しません。
+
+```sh
+just cgz-status <path>
+just cgz-context <path> <task>
+just cgz-affected <path> <files...>
+```
+
+これらは read-only helper です。`.codegraph/` の初期化や更新が必要な場合は、対象 repo で明示的に `cgz init -i <path>` や `cgz index <path>` を実行してください。
+
 ## よく使うコマンド
 
 - 前提と対象状態の確認
@@ -171,6 +183,11 @@ just docs-review <repo> <task-slug>
   - `just docs-audit-all`
   - `just docs-review <repo> <task-slug>`
   - audit は tracked `.md` / `.mdx` / `.txt` / `.rst` / `.adoc` を対象に、機械検査で拾える AI っぽいパターンを報告します。改善時は repo local skill `docs-humanizer` を使います。
+- `cgz` development helper
+  - `just cgz-status <path>`
+  - `just cgz-context <path> <task>`
+  - `just cgz-affected <path> <files...>`
+  - repo local skill `cgz-workflow` を使い、インストール済み `cgz` CLI を read-only な探索・影響確認に使います。
 
 ## 詳細
 

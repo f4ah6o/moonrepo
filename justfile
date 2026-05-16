@@ -828,6 +828,16 @@ docs-audit-all:
 docs-review repo task:
   @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash .agents/skills/docs-humanizer/scripts/docs-workflow.sh "{{repo}}" "{{task}}"
 
+# Read-only cgz helpers for an already installed CLI.
+cgz-status path:
+  cgz status "{{path}}"
+
+cgz-context path task:
+  cgz context --path "{{path}}" "{{task}}"
+
+cgz-affected path *files:
+  cgz affected --path "{{path}}" {{files}}
+
 # Migrate GitHub Issues to local issues/ directory for a single repo
 # Example: just issues-migrate mhx.mbt
 # Example: just issues-migrate mhx.mbt --force --dry-run
