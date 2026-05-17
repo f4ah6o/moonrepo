@@ -101,6 +101,7 @@ clone:
         mkdir -p "$(dirname "$dest")"; \
         dest_abs="$(cd "$(dirname "$dest")" && pwd)/$(basename "$dest")"; \
         git -C "$bare" worktree add "$dest_abs" "$default_branch"; \
+        git -C "$dest_abs" branch --set-upstream-to="origin/$default_branch" "$default_branch" >/dev/null 2>&1 || true; \
       fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/repo-targets.sh list active)'
 

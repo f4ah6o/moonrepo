@@ -213,12 +213,12 @@ start_cmd() {
   base_ref="origin/$default_branch"
   branch_name="$(codex_branch_name "$raw_slug")"
   worktree_name="$(codex_worktree_name "$repo_name" "$raw_slug" "$(date +%Y%m%d)")"
-  worktree_path="$bare_dir/.wt/codex/$(codex_normalize_task_slug "$raw_slug")"
   manifest_path="$(codex_manifest_path "$TASKS_DIR" "$repo_name" "$raw_slug")"
   repo_slug="$(repo_slug_from_path "$repo_path")" \
     || die "missing origin remote for $repo_path"
   bare_dir="$(repo_bare_dir "$repo_path")" \
     || die "cannot resolve bare repo for $repo_path"
+  worktree_path="$bare_dir/.wt/codex/$(codex_normalize_task_slug "$raw_slug")"
 
   if [[ -e "$manifest_path" ]]; then
     die "manifest already exists: $manifest_path"
