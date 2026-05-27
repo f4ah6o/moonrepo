@@ -100,6 +100,7 @@ monorepo ではありません。
 - 親 thread は moonrepo 側に残り、対象 repo の実装は作成済み worktree を所有する Codex worker sub agent に任せる
 - 親 thread の責務は orchestration、最終 review、verification、push、draft PR 作成に限定する
 - 状態確認は `just codex-status <repo> <task-slug>`、draft PR 作成は `just codex-pr <repo> <task-slug>` を使う
+- 並列 worktree を増やす前や PR 整理前は `just codex-health` で stale manifest、missing worktree、branch / PR 状態ずれ、active task 同士の changed path 重複を確認する
 - `AGENTS.md` や skill だけで sub agent 利用を絶対証明することはできない。実効強制は moonrepo の入口 command を通した運用で担保する
 - `just refactor <repo>` は MoonBit refactoring 専用の軽量入口として残すが、通常の repo 実装作業は `codex-start` を優先する
 - document 改善は `docs-review` を入口にし、worker は moonrepo workspace 上の `docs-humanizer` skill を使って対象 worktree を編集する

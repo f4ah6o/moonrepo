@@ -14,6 +14,7 @@ usage:
   codex-task.sh start <repo> <task-slug>
   codex-task.sh status <repo> <task-slug>
   codex-task.sh pr <repo> <task-slug> [gh pr create args...]
+  codex-task.sh health [--no-gh]
 EOF
 }
 
@@ -380,6 +381,221 @@ EOF
   trap - RETURN
 }
 
+manifest_task_slug() {
+  local manifest_path="$1"
+  local repo_name="$2"
+  local file slug
+
+  file="$(basename "$manifest_path")"
+  slug="${file%.json}"
+  slug="${slug#"$repo_name"-}"
+  printf '%s\n' "$slug"
+}
+
+health_print_finding() {
+  local repo_name="$1"
+  local task_slug="$2"
+  local status="$3"
+  local finding="$4"
+  local suggestion="$5"
+
+  printf 'repo=%s task=%s status=%s finding=%s suggestion=%s\n' \
+    "$repo_name" "$task_slug" "$status" "$finding" "$suggestion"
+}
+
+health_changed_paths() {
+  local worktree_path="$1"
+  local base="$2"
+  local branch="$3"
+  local base_ref
+
+  base_ref="origin/$base"
+  if ! git -C "$worktree_path" rev-parse --verify "$base_ref" >/dev/null 2>&1; then
+    base_ref="$base"
+  fi
+
+  git -C "$worktree_path" diff --name-only "$base_ref...$branch" 2>/dev/null \
+    || git -C "$worktree_path" diff --name-only "$base_ref..$branch" 2>/dev/null \
+    || true
+}
+
+health_branch_patch_equivalent() {
+  local worktree_path="$1"
+  local base="$2"
+  local branch="$3"
+  local base_ref cherry
+
+  base_ref="origin/$base"
+  if ! git -C "$worktree_path" rev-parse --verify "$base_ref" >/dev/null 2>&1; then
+    base_ref="$base"
+  fi
+
+  if git -C "$worktree_path" merge-base --is-ancestor "$branch" "$base_ref" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  cherry="$(git -C "$worktree_path" cherry "$base_ref" "$branch" 2>/dev/null || true)"
+  [[ -n "$cherry" ]] || return 1
+  ! grep -q '^+' <<<"$cherry"
+}
+
+health_pr_state() {
+  local repo_slug="$1"
+  local branch="$2"
+
+  gh pr list \
+    --repo "$repo_slug" \
+    --head "$branch" \
+    --state all \
+    --json number,state,mergedAt,url \
+    --limit 1 \
+    --jq '.[0] // empty | if . == "" then "missing" else "\(.state)\t\(.mergedAt // "")\t\(.url)" end' \
+    2>/dev/null || true
+}
+
+health_compact_path_list() {
+  local path_file="$1"
+  local limit="${2:-12}"
+  local count sample
+
+  count="$(wc -l <"$path_file" | tr -d '[:space:]')"
+  sample="$(awk -v limit="$limit" 'NR <= limit { printf "%s%s", sep, $0; sep=", " }' "$path_file")"
+  if [[ "$count" -gt "$limit" ]]; then
+    printf '%s (+%s more)' "$sample" "$((count - limit))"
+  else
+    printf '%s' "$sample"
+  fi
+}
+
+health_cmd() {
+  local use_gh=1 manifest_path repo_name task_slug worktree_path branch base status repo_slug
+  local findings=0 scanned=0 tmpdir gh_available=0 active_index active_paths
+  local current_branch pr_state pr_status pr_merged pr_url
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-gh)
+        use_gh=0
+        shift
+        ;;
+      *)
+        die "usage: codex-task.sh health [--no-gh]"
+        ;;
+    esac
+  done
+
+  tmpdir="$(mktemp -d)"
+  trap 'rm -rf "$tmpdir"' RETURN
+  active_index="$tmpdir/active.tsv"
+  active_paths="$tmpdir/paths"
+  mkdir -p "$active_paths"
+  : >"$active_index"
+
+  if [[ "$use_gh" -eq 1 ]] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    gh_available=1
+  fi
+
+  echo "codex health"
+  echo "tasks_dir: $TASKS_DIR"
+  echo "github:    $(if [[ "$gh_available" -eq 1 ]]; then echo enabled; else echo disabled; fi)"
+  echo
+
+  shopt -s nullglob
+  for manifest_path in "$TASKS_DIR"/*.json; do
+    scanned=$((scanned + 1))
+    repo_name="$(manifest_field "$manifest_path" repo)"
+    worktree_path="$(manifest_field "$manifest_path" worktree)"
+    branch="$(manifest_field "$manifest_path" branch)"
+    base="$(manifest_field "$manifest_path" base)"
+    status="$(manifest_field "$manifest_path" status)"
+    repo_slug="$(manifest_field "$manifest_path" repo_slug)"
+    task_slug="$(manifest_task_slug "$manifest_path" "$repo_name")"
+
+    if [[ -z "$repo_name" || -z "$worktree_path" || -z "$branch" || -z "$base" ]]; then
+      health_print_finding "${repo_name:-unknown}" "$task_slug" "${status:-unknown}" \
+        "invalid manifest fields: $manifest_path" "inspect or recreate manifest"
+      findings=$((findings + 1))
+      continue
+    fi
+
+    if [[ ! -e "$worktree_path/.git" ]]; then
+      health_print_finding "$repo_name" "$task_slug" "$status" \
+        "missing worktree: $worktree_path" "remove stale manifest or restore worktree"
+      findings=$((findings + 1))
+      continue
+    fi
+
+    current_branch="$(repo_current_branch "$worktree_path" || true)"
+    if [[ "$current_branch" != "$branch" ]]; then
+      health_print_finding "$repo_name" "$task_slug" "$status" \
+        "current branch is ${current_branch:-unknown}, expected $branch" \
+        "inspect worktree branch"
+      findings=$((findings + 1))
+    fi
+
+    if ! repo_branch_exists "$worktree_path" "$branch"; then
+      health_print_finding "$repo_name" "$task_slug" "$status" \
+        "local branch missing: $branch" "remove stale manifest or recreate branch"
+      findings=$((findings + 1))
+    elif [[ "$status" == "started" || "$status" == "pr_opened" ]]; then
+      if health_branch_patch_equivalent "$worktree_path" "$base" "$branch"; then
+        health_print_finding "$repo_name" "$task_slug" "$status" \
+          "branch appears merged or patch-equivalent to $base" \
+          "mark task complete and prune worktree after review"
+        findings=$((findings + 1))
+      fi
+    fi
+
+    if [[ "$status" == "started" || "$status" == "pr_opened" ]]; then
+      health_changed_paths "$worktree_path" "$base" "$branch" \
+        | sed '/^[[:space:]]*$/d' >"$active_paths/$scanned"
+      if [[ -s "$active_paths/$scanned" ]]; then
+        printf '%s\t%s\t%s\t%s\n' "$scanned" "$repo_name" "$task_slug" "$status" >>"$active_index"
+      fi
+    fi
+
+    if [[ "$status" == "pr_opened" && "$gh_available" -eq 1 && -n "$repo_slug" ]]; then
+      pr_state="$(health_pr_state "$repo_slug" "$branch")"
+      if [[ -z "$pr_state" || "$pr_state" == "missing" ]]; then
+        health_print_finding "$repo_name" "$task_slug" "$status" \
+          "no GitHub PR found for $branch" "run just codex-pr or update manifest status"
+        findings=$((findings + 1))
+      else
+        IFS=$'\t' read -r pr_status pr_merged pr_url <<<"$pr_state"
+        if [[ "$pr_status" == "MERGED" || -n "$pr_merged" ]]; then
+          health_print_finding "$repo_name" "$task_slug" "$status" \
+            "GitHub PR is merged: $pr_url" "mark task complete and prune worktree after review"
+          findings=$((findings + 1))
+        elif [[ "$pr_status" == "CLOSED" ]]; then
+          health_print_finding "$repo_name" "$task_slug" "$status" \
+            "GitHub PR is closed: $pr_url" "inspect branch and update manifest status"
+          findings=$((findings + 1))
+        fi
+      fi
+    fi
+  done
+  shopt -u nullglob
+
+  if [[ -s "$active_index" ]]; then
+    while IFS=$'\t' read -r left_id left_repo left_task left_status; do
+      while IFS=$'\t' read -r right_id right_repo right_task right_status; do
+        [[ "$left_id" -lt "$right_id" ]] || continue
+        [[ "$left_repo" == "$right_repo" ]] || continue
+        overlap_file="$tmpdir/overlap-$left_id-$right_id"
+        comm -12 <(sort -u "$active_paths/$left_id") <(sort -u "$active_paths/$right_id") >"$overlap_file"
+        [[ -s "$overlap_file" ]] || continue
+        overlap="$(health_compact_path_list "$overlap_file")"
+        health_print_finding "$left_repo" "$left_task,$right_task" "$left_status/$right_status" \
+          "active tasks overlap paths: $overlap" "coordinate branches before continuing"
+        findings=$((findings + 1))
+      done <"$active_index"
+    done <"$active_index"
+  fi
+
+  echo
+  echo "summary: scanned=$scanned findings=$findings"
+}
+
 cmd="${1:-}"
 [[ -n "$cmd" ]] || {
   usage
@@ -391,6 +607,7 @@ case "$cmd" in
   start) start_cmd "$@" ;;
   status) status_cmd "$@" ;;
   pr) pr_cmd "$@" ;;
+  health) health_cmd "$@" ;;
   *)
     usage
     exit 1

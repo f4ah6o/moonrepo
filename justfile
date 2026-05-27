@@ -689,6 +689,12 @@ codex-start repo task:
 codex-status repo task:
   @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/codex-task.sh status "{{repo}}" "{{task}}"
 
+# Check all codex-managed repo task manifests for stale or overlapping work.
+# Example: just codex-health
+# Example: just codex-health --no-gh
+codex-health *args:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/codex-task.sh health {{args}}
+
 # Open a draft PR for a codex-managed repo task.
 # Example: just codex-pr n8n.mbt deps-bump
 # Example: just codex-pr n8n.mbt deps-bump --dry-run
