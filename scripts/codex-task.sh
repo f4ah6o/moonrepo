@@ -122,6 +122,7 @@ codex parent-thread prompt:
   Spawn exactly one worker sub agent for $worktree_path.
   The worker owns all edits inside that worktree and does the repository implementation work.
   The parent thread must stay in moonrepo, perform orchestration only, then review, verify, push, and open the PR after the worker finishes.
+  If ral is installed, use it only for short parent/reviewer messages; keep task state in this manifest, git, and GitHub.
 EOF
 }
 

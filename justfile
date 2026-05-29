@@ -4,6 +4,8 @@ REPO_LIST := "repository.ini"
 REPOS_DIR := "target-repos"
 REPO_SCOPE := "active"
 FORCE := "0"
+RALLY_RS_REPO := "https://github.com/f4ah6o/rally-rs"
+RALLY_RS_REV := "0bfd7afd683a820ed6ff3279c4561521c051a9c6"
 
 # Initialize repository.ini from GitHub repository topics
 # Example: just init f4ah6o --topics moonbit rust
@@ -839,6 +841,99 @@ cgz-context path task:
 
 cgz-affected path *files:
   cgz affected --path "{{path}}" {{files}}
+
+# Install rally-rs from the GitHub revision that contains `ral skills`.
+rally-install:
+  @bash -ceu 'set -euo pipefail; \
+    command -v cargo >/dev/null 2>&1 || { echo "missing command: cargo" >&2; exit 1; }; \
+    cargo install --git "{{RALLY_RS_REPO}}" --rev "{{RALLY_RS_REV}}" --locked --force; \
+    if [[ -f "$HOME/.agents/skills/ral/.rally-rs" ]]; then \
+      ral install --update; \
+    else \
+      ral install; \
+    fi'
+
+# Show whether the optional ral agent messaging helper is ready for moonrepo.
+rally-status:
+  @bash -ceu 'set -euo pipefail; \
+    missing=0; \
+    if command -v ral >/dev/null 2>&1; then \
+      echo "ok command: $(ral --version)"; \
+    else \
+      echo "missing command: ral" >&2; \
+      missing=1; \
+    fi; \
+    skill_dir="$HOME/.agents/skills/ral"; \
+    if [[ -f "$skill_dir/SKILL.md" ]]; then \
+      echo "ok skill: $skill_dir/SKILL.md"; \
+    else \
+      echo "missing skill: $skill_dir/SKILL.md" >&2; \
+      missing=1; \
+    fi; \
+    for script in whoami.sh inbox.sh send.sh history.sh team.sh delivery.sh; do \
+      if [[ -x "$skill_dir/scripts/$script" ]]; then \
+        echo "ok wrapper: $skill_dir/scripts/$script"; \
+      else \
+        echo "missing wrapper: $skill_dir/scripts/$script" >&2; \
+        missing=1; \
+      fi; \
+    done; \
+    if [[ "$missing" -eq 0 ]]; then \
+      "$skill_dir/scripts/whoami.sh" "$(pwd)" codex || true; \
+    else \
+      echo "hint: just rally-install" >&2; \
+    fi; \
+    [[ "$missing" -eq 0 ]]'
+
+# Print the bundled ral Agent Skill without installing files.
+rally-skills:
+  ral skills
+
+# Register this moonrepo checkout as a Codex agent in a ral team.
+rally-join team agent:
+  @bash -ceu 'set -euo pipefail; \
+    skill_dir="$HOME/.agents/skills/ral"; \
+    join="$skill_dir/scripts/join.sh"; \
+    delivery="$skill_dir/scripts/delivery.sh"; \
+    [[ -x "$join" && -x "$delivery" ]] || { echo "missing ral wrappers; run: just rally-install" >&2; exit 1; }; \
+    "$join" "{{team}}" "{{agent}}" codex "$(pwd)"; \
+    "$delivery" set turn codex "$(pwd)"'
+
+rally-whoami:
+  @bash -ceu 'set -euo pipefail; \
+    script="$HOME/.agents/skills/ral/scripts/whoami.sh"; \
+    [[ -x "$script" ]] || { echo "missing ral wrapper; run: just rally-install" >&2; exit 1; }; \
+    "$script" "$(pwd)" codex'
+
+rally-inbox team agent:
+  @bash -ceu 'set -euo pipefail; \
+    script="$HOME/.agents/skills/ral/scripts/inbox.sh"; \
+    [[ -x "$script" ]] || { echo "missing ral wrapper; run: just rally-install" >&2; exit 1; }; \
+    "$script" "{{team}}" "{{agent}}"'
+
+rally-send team from to message:
+  @bash -ceu 'set -euo pipefail; \
+    script="$HOME/.agents/skills/ral/scripts/send.sh"; \
+    [[ -x "$script" ]] || { echo "missing ral wrapper; run: just rally-install" >&2; exit 1; }; \
+    "$script" "{{team}}" "{{from}}" "{{to}}" "{{message}}"'
+
+rally-history team *args:
+  @bash -ceu 'set -euo pipefail; \
+    script="$HOME/.agents/skills/ral/scripts/history.sh"; \
+    [[ -x "$script" ]] || { echo "missing ral wrapper; run: just rally-install" >&2; exit 1; }; \
+    "$script" "$@"' -- "{{team}}" {{args}}
+
+rally-team team:
+  @bash -ceu 'set -euo pipefail; \
+    script="$HOME/.agents/skills/ral/scripts/team.sh"; \
+    [[ -x "$script" ]] || { echo "missing ral wrapper; run: just rally-install" >&2; exit 1; }; \
+    "$script" "{{team}}"'
+
+rally-mode mode:
+  @bash -ceu 'set -euo pipefail; \
+    script="$HOME/.agents/skills/ral/scripts/delivery.sh"; \
+    [[ -x "$script" ]] || { echo "missing ral wrapper; run: just rally-install" >&2; exit 1; }; \
+    "$script" set "{{mode}}" codex "$(pwd)"'
 
 # Migrate GitHub Issues to local issues/ directory for a single repo
 # Example: just issues-migrate mhx.mbt

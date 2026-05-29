@@ -24,6 +24,8 @@ monorepo ではありません。
 - 手動インストールする場合（codex 用）
   - `gh skill install moonbitlang/moonbit-agent-guide moonbit-agent-guide --agent codex --scope user`
   - `gh skill install moonbitlang/moonbit-agent-guide moonbit-refactoring --agent codex --scope user`
+- 任意 helper
+  - `ral`（agent 間の短い連絡用。必要な場合だけ `cargo` 付きの環境で `just rally-install` する）
 
 ## しないこと
 
@@ -92,6 +94,13 @@ monorepo ではありません。
    - 使う前に `command -v dwiki` と `dwiki check <owner>/<repo> --output json` で利用可否を確認する
    - `dwiki read/ask/search ... --output json | jq -r .result` で必要部分だけ読む
    - `dwiki` の出力は調査の入口として扱い、実装や結論の前に local file で確認する
+18. `ral` で agent 間の短い連絡を行う
+   - `ral` は任意 helper として扱う。`just doctor` の必須前提には含めない
+   - `just rally-install` は `ral skills` を含む `github.com/f4ah6o/rally-rs` の確認済み revision を install する
+   - `ral install` は `~/.agents/skills/ral/` と `~/.codex/config.toml` を更新する
+   - `just rally-status` / `just rally-skills` / `just rally-join <team> <agent>` で利用状態と skill 文面を確認する
+   - `just rally-inbox <team> <agent>` / `just rally-send <team> <from> <to> "<message>"` で連絡する
+   - `ral` は task state の正ではない。task state は `.codex/tasks/*.json`、git、GitHub を正とする
 
 ## Codex sub agent 運用
 
@@ -104,6 +113,7 @@ monorepo ではありません。
 - `AGENTS.md` や skill だけで sub agent 利用を絶対証明することはできない。実効強制は moonrepo の入口 command を通した運用で担保する
 - `just refactor <repo>` は MoonBit refactoring 専用の軽量入口として残すが、通常の repo 実装作業は `codex-start` を優先する
 - document 改善は `docs-review` を入口にし、worker は moonrepo workspace 上の `docs-humanizer` skill を使って対象 worktree を編集する
+- 複数 agent を併用する場合、`ral` は短い依頼・完了通知・ブロッカー共有にだけ使う。実装指示、レビュー結果、PR 状態は manifest と GitHub に残す
 
 ## 一括実行コマンド
 

@@ -156,6 +156,29 @@ dwiki search <owner>/<repo> "SessionStore" --output json | jq -r .result
 
 `dwiki` の結果は概要把握と候補ファイル探しに使います。実装変更や調査結論は、対象 repo の local file を読んで確認してください。
 
+11. `ral` で agent 間の短い連絡を扱う場合
+
+`ral` は任意の helper です。moonrepo の task state は `.codex/tasks/*.json`、git、GitHub を正とし、`ral` は親 thread、Codex worker、Claude Code、OpenCode reviewer の短い依頼や完了通知にだけ使います。
+
+現時点では `ral skills` が crates.io の `2026.5.0` には入っていないため、`just rally-install` は `f4ah6o/rally-rs` の確認済み revision を指定して install します。
+`just rally-install` は `cargo` を使います。
+`ral install` は `~/.agents/skills/ral/` に skill、wrapper、SQLite DB、team 設定を作り、Codex 用の writable roots を `~/.codex/config.toml` に追記します。
+
+```sh
+just rally-install
+just rally-status
+just rally-skills
+just rally-join <team> <agent>
+just rally-whoami
+just rally-inbox <team> <agent>
+just rally-send <team> <from> <to> "<message>"
+just rally-history <team>
+just rally-team <team>
+just rally-mode turn
+```
+
+Codex では `turn` mode を使います。team 名は `repo-task-slug` のように、対象 repo と作業内容が分かる名前にします。
+
 ## よく使うコマンド
 
 - 前提と対象状態の確認
@@ -211,6 +234,18 @@ dwiki search <owner>/<repo> "SessionStore" --output json | jq -r .result
 - `dwiki` overview helper
   - repo local skill `dwiki-workflow` を使い、`dwiki check/read/ask/search` で概要や候補ファイルを低トークンに調べます。
   - `dwiki` は任意コマンドなので、未インストール時は通常の local file 探索に戻ります。
+- `ral` agent messaging helper
+  - `just rally-install`
+  - `just rally-status`
+  - `just rally-skills`
+  - `just rally-join <team> <agent>`
+  - `just rally-whoami`
+  - `just rally-inbox <team> <agent>`
+  - `just rally-send <team> <from> <to> "<message>"`
+  - `just rally-history <team>`
+  - `just rally-team <team>`
+  - `just rally-mode turn`
+  - `ral` は任意コマンドです。`just doctor` の必須前提には含めません。
 
 ## 詳細
 
