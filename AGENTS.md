@@ -31,6 +31,14 @@ monorepo ではありません。
 
 - monorepo 化しない
 
+## moonrepo 本体の作業
+
+- `/Users/fu2hito/src/moonrepo` 自体の変更は、この checkout で直接行う。
+- 作業前に `docs/DEVELOPMENT_GUIDE.md` を読み、`docs/YYYY-MM-DD.md` に日本語で当日の計画と、変更対象ファイル・変更内容の実装計画を書く。
+- 既存の dirty worktree は利用者または別作業の変更として扱い、今回の作業に不要なら触らない。必要な場合も内容を確認してから共存させる。
+- moonrepo 本体の変更には、target repo 用の `just codex-start <repo> <task-slug>`、`just docs-review <repo> <task-slug>`、`target-repos/<repo>.git/.wt/codex/` worktree を使わない。
+- 検証は変更範囲に合わせる。ドキュメントだけなら差分確認を基本にし、コードや recipe を触った場合は `just check` / `just test` / `just build` など該当する確認を行う。
+
 ## Release Rule
 
 - `target-repos/aci-rs.git/.wt/main` のバージョンは CalVer `YYYY.M.Patch` を使う（例: `2026.3.0`）。
