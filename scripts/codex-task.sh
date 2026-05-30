@@ -54,9 +54,8 @@ require_repo_upstream() {
 
 require_clean_repo() {
   local path="$1"
-  if repo_is_dirty "$path"; then
-    die "repo is dirty: $path"$'\n'"hint: commit or stash before starting a codex task"
-  fi
+  repo_require_baseline_main "$path" \
+    || die "baseline worktree is not ready for a codex task"$'\n'"hint: keep .wt/main clean on its default branch, then retry"
 }
 
 write_manifest() {

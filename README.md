@@ -41,13 +41,21 @@ git worktree / bare repo layout の参考:
 
 ## Codex 実装フロー
 
-`target-repos/<repo>.git/.wt/main` 配下の実装変更は、親 thread が直接その worktree を触るのではなく、`just codex-start <repo> <task-slug>` を入口にして専用 worktree へ切り出す運用を標準にします。
+`target-repos/<repo>.git/.wt/main` は default branch の baseline checkout として固定します。この worktree で branch を切ったり tracked file を変更したりせず、実装変更は `just codex-start <repo> <task-slug>` または `just target-task-start <repo> <task-slug>` を入口にして専用 worktree へ切り出します。
 
 - 親 thread は moonrepo 側に残って orchestration だけを行う
 - 実装変更は対象 worktree を所有する Codex worker sub agent に寄せる
 - 親 thread は最後に review / verification / push / draft PR 作成を担当する
 
-`just codex-start` は `.wt/main` の clean 状態と upstream を確認し、`target-repos/<repo>.git/.wt/codex/<task-slug>/` と `codex/<task-slug>` branch、`.codex/tasks/<repo>-<task-slug>.json` manifest を作ります。完了後に worker 起動用の Codex prompt を出力します。
+`just codex-start` は `.wt/main` が default branch で clean、upstream が `origin/<default-branch>`、local ahead なしであることを確認し、`target-repos/<repo>.git/.wt/codex/<task-slug>/` と `codex/<task-slug>` branch、`.codex/tasks/<repo>-<task-slug>.json` manifest を作ります。完了後に worker 起動用の Codex prompt を出力します。
+
+Codex worker を使わない手作業や recipe 用の worktree は、次で作ります。
+
+```sh
+just target-task-start <repo> <task-slug>
+just target-main-check <repo>
+just target-main-check-all
+```
 
 状態確認と PR 作成:
 
@@ -79,7 +87,7 @@ just init <owner> --topics moonbit rust
 just clone
 ```
 
-`just clone` は各リポジトリを bare clone (`target-repos/<name>.git/`) として取得し、その既定ブランチ（`origin/HEAD`）を `target-repos/<name>.git/.wt/main/` に `git worktree add` します。bare repo には `wt.basedir=.wt` を設定します。複数ブランチで並行作業したい場合は、`git-wt` または bare 側から追加 worktree を生やしてください。レイアウト変更時は `just --set FORCE 1 cclone` で作り直してください。
+`just clone` は各リポジトリを bare clone (`target-repos/<name>.git/`) として取得し、その既定ブランチ（`origin/HEAD`）を `target-repos/<name>.git/.wt/main/` に `git worktree add` します。bare repo には `wt.basedir=.wt` を設定します。`.wt/main` は baseline として固定し、複数ブランチで並行作業したい場合は `just codex-start` または `just target-task-start` から追加 worktree を生やしてください。レイアウト変更時は `just --set FORCE 1 cclone` で作り直してください。
 
 4. pull（既存リポジトリの更新）
 

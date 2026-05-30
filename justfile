@@ -127,6 +127,7 @@ clean:
 
 doctor:
   @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
     missing=0; \
     for cmd in gh git-wt just moon moon-dst jq; do \
       if command -v "$cmd" >/dev/null 2>&1; then \
@@ -150,6 +151,9 @@ doctor:
       fi; \
       if [[ ! -e "$path/.git" ]]; then \
         echo "missing worktree: $repo -> $path" >&2; ok=0; \
+      fi; \
+      if [[ -e "$path/.git" ]] && ! repo_require_baseline_main "$path"; then \
+        ok=0; \
       fi; \
       wt_basedir="$(git -C "$bare" config --get wt.basedir 2>/dev/null || true)"; \
       if [[ -d "$bare" && "$wt_basedir" != ".wt" ]]; then \
@@ -177,6 +181,52 @@ doctor:
     done; \
     echo "summary: missing=$missing active_missing=$active_missing extra_cloned=$extra_cloned"; \
     [[ "$missing" -eq 0 && "$active_missing" -eq 0 ]]'
+
+# Verify that a target repo baseline checkout is clean and fixed to its default branch.
+target-main-check repo:
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    name="{{repo}}"; \
+    name="${name##*/}"; \
+    path="$(repo_main_worktree_path_from_name "$name")"; \
+    repo_require_baseline_main "$path"; \
+    echo "ok baseline: $path"'
+
+# Verify all selected target repo baseline checkouts.
+target-main-check-all:
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    ok=0; missing=0; failed=0; \
+    while IFS=$'\''\t'\'' read -r repo name path; do \
+      if [[ ! -e "$path/.git" ]]; then \
+        echo "missing: $repo -> $path" >&2; \
+        missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if repo_require_baseline_main "$path"; then \
+        echo "ok baseline: $repo"; \
+        ok=$((ok + 1)); \
+      else \
+        failed=$((failed + 1)); \
+      fi; \
+    done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
+    echo "summary: ok=$ok missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
+
+# Create a dedicated target repo worktree for non-codex manual or recipe work.
+target-task-start repo task:
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    name="{{repo}}"; \
+    name="${name##*/}"; \
+    path="$(repo_main_worktree_path_from_name "$name")"; \
+    [[ -e "$path/.git" ]] || { echo "missing worktree: $path" >&2; exit 1; }; \
+    IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" task "{{task}}"); \
+    echo "created target task worktree"; \
+    echo "repo:     $name"; \
+    echo "worktree: $worktree"; \
+    echo "branch:   $branch"; \
+    echo "base:     $base"'
 
 target-repos-prune *args:
   @bash -ceu 'set -euo pipefail; \
@@ -243,8 +293,8 @@ pull:
         missing=$((missing + 1)); \
         continue; \
       fi; \
-      if repo_is_dirty "$path"; then \
-        echo "skip dirty: $repo"; \
+      if ! repo_require_baseline_main "$path"; then \
+        echo "skip baseline-not-ready: $repo"; \
         skipped_dirty=$((skipped_dirty + 1)); \
         continue; \
       fi; \
@@ -473,23 +523,28 @@ deps-scan-all *args:
 deps-apply-all *args:
   @bash -ceu 'set -euo pipefail; \
     source scripts/repo-lib.sh; \
-    ok=0; missing=0; skipped_dirty=0; failed=0; \
+    ok=0; missing=0; skipped_baseline=0; failed=0; \
+    task="deps-apply-$(date +%Y%m%d%H%M%S)"; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
       if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
       fi; \
-      if repo_is_dirty "$path"; then \
-        echo "skip dirty: $repo"; \
-        skipped_dirty=$((skipped_dirty + 1)); \
+      if ! repo_require_baseline_main "$path"; then \
+        echo "skip baseline-not-ready: $repo"; \
+        skipped_baseline=$((skipped_baseline + 1)); \
         continue; \
       fi; \
-      echo "deps apply: $repo"; \
-      if moon-dst apply --root "$path" "$@"; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+      if IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" deps-apply "$task"); then \
+        echo "deps apply: $repo -> $worktree ($branch from $base)"; \
+        if moon-dst apply --root "$worktree" "$@"; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+      else \
+        failed=$((failed + 1)); \
+      fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
-    echo "summary: ok=$ok skipped_dirty=$skipped_dirty missing=$missing failed=$failed"; \
-    [[ "$skipped_dirty" -eq 0 && "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
+    echo "summary: ok=$ok skipped_baseline=$skipped_baseline missing=$missing failed=$failed"; \
+    [[ "$skipped_baseline" -eq 0 && "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
 
 # Add justfile to all repos
 # Example: just deps-just-all --mode skip
@@ -497,23 +552,28 @@ deps-apply-all *args:
 deps-just-all *args:
   @bash -ceu 'set -euo pipefail; \
     source scripts/repo-lib.sh; \
-    ok=0; missing=0; skipped_dirty=0; failed=0; \
+    ok=0; missing=0; skipped_baseline=0; failed=0; \
+    task="deps-just-$(date +%Y%m%d%H%M%S)"; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
       if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
       fi; \
-      if repo_is_dirty "$path"; then \
-        echo "skip dirty: $repo"; \
-        skipped_dirty=$((skipped_dirty + 1)); \
+      if ! repo_require_baseline_main "$path"; then \
+        echo "skip baseline-not-ready: $repo"; \
+        skipped_baseline=$((skipped_baseline + 1)); \
         continue; \
       fi; \
-      echo "deps just: $repo"; \
-      if moon-dst just --root "$path" "$@"; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+      if IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" deps-just "$task"); then \
+        echo "deps just: $repo -> $worktree ($branch from $base)"; \
+        if moon-dst just --root "$worktree" "$@"; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+      else \
+        failed=$((failed + 1)); \
+      fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
-    echo "summary: ok=$ok skipped_dirty=$skipped_dirty missing=$missing failed=$failed"; \
-    [[ "$skipped_dirty" -eq 0 && "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
+    echo "summary: ok=$ok skipped_baseline=$skipped_baseline missing=$missing failed=$failed"; \
+    [[ "$skipped_baseline" -eq 0 && "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
 
 # Scan dependencies for one target repo worktree.
 # Example: just deps-scan moonbit-lang-core
@@ -521,27 +581,43 @@ deps-just-all *args:
 deps-scan repo *args:
   @bash -ceu 'source scripts/repo-lib.sh; moon-dst scan --root "$(repo_main_worktree_path_from_name "{{repo}}")" "$@"' -- {{args}}
 
-# Apply dependency updates for one target repo worktree.
-# Example: just deps-apply moonbit-lang-core --dry-run
+# Apply dependency updates in a dedicated target repo worktree.
+# Example: just deps-apply moonbit-lang-core deps-bump --dry-run
 
-deps-apply repo *args:
-  @bash -ceu 'source scripts/repo-lib.sh; moon-dst apply --root "$(repo_main_worktree_path_from_name "{{repo}}")" "$@"' -- {{args}}
+deps-apply repo task *args:
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    path="$(repo_main_worktree_path_from_name "{{repo}}")"; \
+    IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" deps-apply "{{task}}"); \
+    echo "deps apply: {{repo}} -> $worktree ($branch from $base)"; \
+    moon-dst apply --root "$worktree" "$@"' -- {{args}}
 
-# Add justfile to one target repo worktree.
-# Example: just deps-just moonbit-lang-core --mode skip
+# Add justfile in a dedicated target repo worktree.
+# Example: just deps-just moonbit-lang-core justfile-refresh --mode skip
 
-deps-just repo *args:
-  @bash -ceu 'source scripts/repo-lib.sh; moon-dst just --root "$(repo_main_worktree_path_from_name "{{repo}}")" "$@"' -- {{args}}
+deps-just repo task *args:
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    path="$(repo_main_worktree_path_from_name "{{repo}}")"; \
+    IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" deps-just "{{task}}"); \
+    echo "deps just: {{repo}} -> $worktree ($branch from $base)"; \
+    moon-dst just --root "$worktree" "$@"' -- {{args}}
 
 # Run moon fmt/check/build/clean for all repos (turbo-like)
 moon-fmt-all:
   @bash -ceu 'set -euo pipefail; \
     source scripts/repo-lib.sh; \
-    ok=0; missing=0; skipped_not_moon=0; failed=0; \
+    ok=0; missing=0; skipped_not_moon=0; skipped_baseline=0; failed=0; \
+    task="moon-fmt-$(date +%Y%m%d%H%M%S)"; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
       if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
+        continue; \
+      fi; \
+      if ! repo_require_baseline_main "$path"; then \
+        echo "skip baseline-not-ready: $repo"; \
+        skipped_baseline=$((skipped_baseline + 1)); \
         continue; \
       fi; \
       if ! repo_is_moon "$path"; then \
@@ -549,11 +625,15 @@ moon-fmt-all:
         skipped_not_moon=$((skipped_not_moon + 1)); \
         continue; \
       fi; \
-      echo "moon fmt: $repo"; \
-      if moon -C "$path" fmt; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+      if IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" moon-fmt "$task"); then \
+        echo "moon fmt: $repo -> $worktree ($branch from $base)"; \
+        if moon -C "$worktree" fmt; then ok=$((ok + 1)); else failed=$((failed + 1)); fi; \
+      else \
+        failed=$((failed + 1)); \
+      fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
-    echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon missing=$missing failed=$failed"; \
-    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
+    echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon skipped_baseline=$skipped_baseline missing=$missing failed=$failed"; \
+    [[ "$missing" -eq 0 && "$skipped_baseline" -eq 0 && "$failed" -eq 0 ]]'
 
 moon-check-all:
   @bash -ceu 'set -euo pipefail; \
@@ -618,9 +698,16 @@ moon-clean-all:
     echo "summary: ok=$ok skipped_not_moon=$skipped_not_moon missing=$missing failed=$failed"; \
     [[ "$missing" -eq 0 && "$failed" -eq 0 ]]'
 
-# Run moon fmt/check/build/clean for a single target repo worktree.
-moon-fmt repo:
-  @bash -ceu 'source scripts/repo-lib.sh; moon -C "$(repo_main_worktree_path_from_name "{{repo}}")" fmt'
+# Run moon fmt in a dedicated target repo worktree.
+moon-fmt repo task:
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    path="$(repo_main_worktree_path_from_name "{{repo}}")"; \
+    IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" moon-fmt "{{task}}"); \
+    echo "moon fmt: {{repo}} -> $worktree ($branch from $base)"; \
+    moon -C "$worktree" fmt'
+
+# Run moon check/build/clean for a single target repo baseline worktree.
 
 moon-check repo:
   @bash -ceu 'source scripts/repo-lib.sh; moon -C "$(repo_main_worktree_path_from_name "{{repo}}")" check'
@@ -722,11 +809,7 @@ refactor repo:
       echo "not a moon module (missing moon.mod.json): $path" >&2; \
       exit 1; \
     fi; \
-    if repo_is_dirty "$path"; then \
-      echo "repo is dirty: $path" >&2; \
-      echo "hint: commit or stash before refactoring" >&2; \
-      exit 1; \
-    fi; \
+    repo_require_baseline_main "$path"; \
     skill_root="$HOME/.codex/skills"; \
     missing_skill=0; \
     for skill in moonbit-agent-guide moonbit-refactoring; do \
@@ -739,17 +822,19 @@ refactor repo:
       echo "hint: just skills-init" >&2; \
       exit 1; \
     fi; \
-    branch_default="refactor/$(date +%Y%m%d)"; \
-    echo "repo:    $path"; \
+    task="refactor-$(date +%Y%m%d)"; \
+    IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" refactor "$task"); \
+    echo "repo:    $worktree"; \
+    echo "branch:  $branch"; \
+    echo "base:    $base"; \
     echo "skill:   moonbit-refactoring (via moonbit-agent-guide)"; \
     echo ""; \
     echo "workflow:"; \
-    echo "  1. cd $path"; \
-    echo "  2. git switch -c $branch_default  # or use an existing branch"; \
-    echo "  3. start codex (or claude) in that directory and invoke moonbit-refactoring"; \
-    echo "  4. follow the skill workflow: architecture review -> API inventory -> smallest safe change"; \
-    echo "  5. moon check && moon test"; \
-    echo "  6. commit + push + open PR"'
+    echo "  1. cd $worktree"; \
+    echo "  2. start codex (or claude) in that directory and invoke moonbit-refactoring"; \
+    echo "  3. follow the skill workflow: architecture review -> API inventory -> smallest safe change"; \
+    echo "  4. moon check && moon test"; \
+    echo "  5. commit + push + open PR"'
 
 # Run a Cloudflare demo workflow for a supported repo.
 _cloudflare-run repo action:
@@ -935,11 +1020,16 @@ rally-mode mode:
     [[ -x "$script" ]] || { echo "missing ral wrapper; run: just rally-install" >&2; exit 1; }; \
     "$script" set "{{mode}}" codex "$(pwd)"'
 
-# Migrate GitHub Issues to local issues/ directory for a single repo
-# Example: just issues-migrate mhx.mbt
-# Example: just issues-migrate mhx.mbt --force --dry-run
-issues-migrate repo *args:
-  @bash -ceu 'source scripts/repo-lib.sh; bash .agents/skills/issues-migrate/scripts/migrate-issues.sh --path "$(repo_main_worktree_path_from_name "{{repo}}")" "$@"' -- {{args}}
+# Migrate GitHub Issues to local issues/ directory in a dedicated worktree for a single repo
+# Example: just issues-migrate mhx.mbt issues-migration
+# Example: just issues-migrate mhx.mbt issues-migration --force --dry-run
+issues-migrate repo task *args:
+  @bash -ceu 'set -euo pipefail; \
+    source scripts/repo-lib.sh; \
+    path="$(repo_main_worktree_path_from_name "{{repo}}")"; \
+    IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" issues-migrate "{{task}}"); \
+    echo "migrate: {{repo}} -> $worktree ($branch from $base)"; \
+    bash .agents/skills/issues-migrate/scripts/migrate-issues.sh --path "$worktree" "$@"' -- {{args}}
 
 # Migrate GitHub Issues to local issues/ directory for all active repos
 # Example: just issues-migrate-all
@@ -947,22 +1037,32 @@ issues-migrate repo *args:
 issues-migrate-all *args:
   @bash -ceu 'set -euo pipefail; \
     source scripts/repo-lib.sh; \
-    ok=0; missing=0; failed=0; \
+    ok=0; missing=0; skipped_baseline=0; failed=0; \
+    task="issues-migrate-$(date +%Y%m%d%H%M%S)"; \
     while IFS=$'\''\t'\'' read -r repo name path; do \
       if [[ ! -e "$path/.git" ]]; then \
         echo "missing: $repo -> $path" >&2; \
         missing=$((missing + 1)); \
         continue; \
       fi; \
-      echo "migrate: $repo"; \
-      if bash .agents/skills/issues-migrate/scripts/migrate-issues.sh --path "$path" {{args}}; then \
-        ok=$((ok + 1)); \
+      if ! repo_require_baseline_main "$path"; then \
+        echo "skip baseline-not-ready: $repo"; \
+        skipped_baseline=$((skipped_baseline + 1)); \
+        continue; \
+      fi; \
+      if IFS=$'\''\t'\'' read -r worktree branch base < <(repo_start_task_worktree "$path" issues-migrate "$task"); then \
+        echo "migrate: $repo -> $worktree ($branch from $base)"; \
+        if bash .agents/skills/issues-migrate/scripts/migrate-issues.sh --path "$worktree" {{args}}; then \
+          ok=$((ok + 1)); \
+        else \
+          failed=$((failed + 1)); \
+        fi; \
       else \
         failed=$((failed + 1)); \
       fi; \
     done < <(REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" REPO_SCOPE="{{REPO_SCOPE}}" bash scripts/repo-targets.sh list); \
-    echo "summary: ok=$ok missing=$missing failed=$failed"; \
-    [[ "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
+    echo "summary: ok=$ok skipped_baseline=$skipped_baseline missing=$missing failed=$failed"; \
+    [[ "$skipped_baseline" -eq 0 && "$missing" -eq 0 && "$failed" -eq 0 ]]' -- {{args}}
 
 # Standard CI entrypoints for this repo
 apply: deps-apply-all

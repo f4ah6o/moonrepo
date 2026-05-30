@@ -197,15 +197,25 @@ for name in "${names[@]}"; do
     continue
   fi
 
-  if repo_is_dirty "$path"; then
-    echo "skip dirty: $slug"
+  if ! repo_require_baseline_main "$path"; then
+    echo "skip baseline-not-ready: $slug"
     skipped_dirty=$((skipped_dirty + 1))
     continue
   fi
 
-  printf 'repo: %s (path: %s)\n' "$slug" "$path"
-  bump_tool_versions "$path" "$VERSION" "$APPLY" || failed=$((failed + 1))
-  bump_workflows     "$path" "$VERSION" "$APPLY" || failed=$((failed + 1))
+  if [[ "$APPLY" -eq 1 ]]; then
+    if IFS=$'\t' read -r worktree branch base < <(repo_start_task_worktree "$path" moonbit-bump "moonbit-bump-$VERSION"); then
+      printf 'repo: %s (path: %s, branch: %s, base: %s)\n' "$slug" "$worktree" "$branch" "$base"
+      bump_tool_versions "$worktree" "$VERSION" "$APPLY" || failed=$((failed + 1))
+      bump_workflows     "$worktree" "$VERSION" "$APPLY" || failed=$((failed + 1))
+    else
+      failed=$((failed + 1))
+    fi
+  else
+    printf 'repo: %s (path: %s)\n' "$slug" "$path"
+    bump_tool_versions "$path" "$VERSION" "$APPLY" || failed=$((failed + 1))
+    bump_workflows     "$path" "$VERSION" "$APPLY" || failed=$((failed + 1))
+  fi
   planned=$((planned + 1))
 done
 

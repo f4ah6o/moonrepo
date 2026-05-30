@@ -50,6 +50,9 @@ monorepo ではありません。
 2. `--topics` 未指定時は `moonbit rust` が使われる
 3. `repository.ini` の有効行に、今回 clone / 一括運用する `<owner>/<repo>` を1行ずつ記載（空行と `#` / `;` 行は無視）
 4. `just clone` で `./target-repos/<repo>.git` に bare clone し、`./target-repos/<repo>.git/.wt/main` を作る
+   - `.wt/main` は default branch の baseline checkout として固定する
+   - `.wt/main` で branch を切ったり tracked file を変更したりしない
+   - 作業ごとの変更は `just codex-start <repo> <task-slug>` または `just target-task-start <repo> <task-slug>` で `.wt/` 配下の専用 worktree を作って行う
 5. `just doctor` で前提コマンド・`repository.ini`・clone 状態を確認
 6. `just pull` で既存 active repo を更新
    - 全 clone を対象にしたい場合だけ `just --set REPO_SCOPE cloned pull`
@@ -63,10 +66,10 @@ monorepo ではありません。
 10. 依存の確認と適用
    - `just deps-scan-all`
    - `just deps-apply-all`
-   - 個別: `just deps-scan <repo>` / `just deps-apply <repo>`
+   - 個別: `just deps-scan <repo>` / `just deps-apply <repo> <task-slug>`
 11. `moon-dst just` 相当
    - `just deps-just-all`
-   - `just deps-just <repo>`
+   - `just deps-just <repo> <task-slug>`
 12. moonbit toolchain 本体の一括更新（`repository.ini` 非依存。`f4ah6o` + `moonbit` topic の全 repo が対象）
    - `just moonbit-bump-scan`
    - `just moonbit-bump <version>`
@@ -75,7 +78,7 @@ monorepo ではありません。
    - `moonbitlang/*` deps は対象外（`just deps-apply-all` を別途実行）
    - 未 clone の repo は warn のみでスキップ（自動 clone はしない）
 13. GitHub Issues のローカル移行（`issues-migrate` skill 経由）
-   - `just issues-migrate <repo>` で GitHub Issues を `issues/` に移行
+   - `just issues-migrate <repo> <task-slug>` で専用 worktree を作り、GitHub Issues を `issues/` に移行
    - `just issues-migrate-all` で全 active repo を一括移行
    - `--force` で既存ファイル上書き、`--dry-run` で確認のみ
    - 移行後 GitHub 側の issue にコメント付与 → close
@@ -112,7 +115,8 @@ monorepo ではありません。
 
 ## Codex sub agent 運用
 
-- `target-repos/<repo>.git/.wt/main` 配下の実装変更は `just codex-start <repo> <task-slug>` を入口にする
+- `target-repos/<repo>.git/.wt/main` は default branch の baseline として固定し、実装変更の作業場にしない
+- `target-repos/<repo>.git/.wt/main` 配下の実装変更が必要な場合は `just codex-start <repo> <task-slug>` または `just target-task-start <repo> <task-slug>` を入口にする
 - `just codex-start` は `.wt/main` の clean 状態と upstream を確認し、`target-repos/<repo>.git/.wt/codex/<task-slug>/` と `codex/<task-slug>` branch、`.codex/tasks/<repo>-<task-slug>.json` manifest を作る
 - 親 thread は moonrepo 側に残り、対象 repo の実装は作成済み worktree を所有する Codex worker sub agent に任せる
 - 親 thread の責務は orchestration、最終 review、verification、push、draft PR 作成に限定する
@@ -134,7 +138,7 @@ monorepo ではありません。
   - 既定対象は `repository.ini` の active repo
   - 全 clone を対象にしたい場合は `just --set REPO_SCOPE cloned <recipe>`
 - 個別 repo
-  - `just moon-fmt <repo>`
+  - `just moon-fmt <repo> <task-slug>`
   - `just moon-check <repo>`
   - `just moon-build <repo>`
   - `just moon-clean <repo>`

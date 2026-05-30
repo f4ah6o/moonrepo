@@ -13,6 +13,7 @@ description: strongly inspired https://github.com/tokuhirom/sabos/blob/main/CLAU
 - Commit and push to the main branch frequently. Do not use PRs or branch-based workflows.
 - Commit often and keep the state functional.
 - Commit every time a single task (feature addition/fix) is completed. Do not commit multiple tasks at once.
+- For target repos under `target-repos/<repo>.git/.wt/`, keep `.wt/main` as the clean default-branch baseline. Do task work in a dedicated worktree created by `just codex-start <repo> <task-slug>` or `just target-task-start <repo> <task-slug>`.
 
 ## Development Principles
 

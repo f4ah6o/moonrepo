@@ -268,7 +268,88 @@ repo_add_worktree() {
   fi
   mkdir -p "$(dirname "$worktree_path")"
   worktree_abs="$(cd "$(dirname "$worktree_path")" && pwd)/$(basename "$worktree_path")"
-  git -C "$bare" worktree add -b "$branch" "$worktree_abs" "$base_ref"
+  git -C "$bare" worktree add --quiet -b "$branch" "$worktree_abs" "$base_ref"
+}
+
+repo_require_baseline_main() {
+  local path="$1"
+  local default_branch current_branch upstream ahead
+
+  [[ -e "$path/.git" ]] || {
+    echo "missing worktree: $path" >&2
+    return 1
+  }
+
+  default_branch="$(repo_default_branch "$path")" || {
+    echo "cannot determine default branch: $path" >&2
+    return 1
+  }
+  current_branch="$(repo_current_branch "$path" || true)"
+  if [[ "$current_branch" != "$default_branch" ]]; then
+    echo "baseline worktree must stay on $default_branch: $path (current: ${current_branch:-unknown})" >&2
+    return 1
+  fi
+
+  upstream="$(repo_upstream_ref "$path" || true)"
+  if [[ "$upstream" != "origin/$default_branch" ]]; then
+    echo "baseline worktree must track origin/$default_branch: $path (upstream: ${upstream:-none})" >&2
+    return 1
+  fi
+
+  if repo_is_dirty "$path"; then
+    echo "baseline worktree is dirty: $path" >&2
+    return 1
+  fi
+
+  ahead="$(repo_ahead_count "$path")"
+  if [[ "$ahead" != "0" ]]; then
+    echo "baseline worktree has local commits: $path (ahead=$ahead)" >&2
+    return 1
+  fi
+}
+
+repo_task_branch_name() {
+  local kind="$1"
+  local raw="$2"
+  local slug
+
+  slug="$(codex_normalize_task_slug "$raw")" || return 1
+  printf '%s/%s\n' "$kind" "$slug"
+}
+
+repo_task_worktree_path() {
+  local repo_path="$1"
+  local kind="$2"
+  local raw="$3"
+  local bare slug
+
+  bare="$(repo_bare_dir "$repo_path")" || return 1
+  slug="$(codex_normalize_task_slug "$raw")" || return 1
+  printf '%s/.wt/%s/%s\n' "$bare" "$kind" "$slug"
+}
+
+repo_start_task_worktree() {
+  local repo_path="$1"
+  local kind="$2"
+  local raw_slug="$3"
+  local default_branch base_ref branch worktree_path bare
+
+  repo_require_baseline_main "$repo_path" || return 1
+  default_branch="$(repo_default_branch "$repo_path")" || return 1
+  base_ref="origin/$default_branch"
+  branch="$(repo_task_branch_name "$kind" "$raw_slug")" || return 1
+  worktree_path="$(repo_task_worktree_path "$repo_path" "$kind" "$raw_slug")" || return 1
+  bare="$(repo_bare_dir "$repo_path")" || return 1
+
+  git -C "$bare" config wt.basedir .wt
+  git -C "$bare" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+  git -C "$bare" fetch --quiet origin
+  if ! git -C "$bare" show-ref --verify --quiet "refs/remotes/origin/$default_branch"; then
+    base_ref="$default_branch"
+  fi
+
+  repo_add_worktree "$repo_path" "$worktree_path" "$branch" "$base_ref"
+  printf '%s\t%s\t%s\n' "$worktree_path" "$branch" "$default_branch"
 }
 
 list_active_repo_entries() {
