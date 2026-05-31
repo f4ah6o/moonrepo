@@ -368,6 +368,13 @@ list_active_repo_entries() {
       if (line == "" || line ~ /^[#;]/) {
         next
       }
+      if (line ~ /^\[[^]]+\]$/) {
+        section = tolower(substr(line, 2, length(line) - 2))
+        next
+      }
+      if (section != "" && section != "repositories") {
+        next
+      }
       if (line !~ /^[^\/[:space:]]+\/[^\/[:space:]]+$/) {
         printf "invalid repository.ini line: %s\n", line > "/dev/stderr"
         invalid = 1

@@ -48,7 +48,9 @@ monorepo ではありません。
 
 1. `just init <owner> --topics moonbit rust` で `repository.ini` を初期生成
 2. `--topics` 未指定時は `moonbit rust` が使われる
-3. `repository.ini` の有効行に、今回 clone / 一括運用する `<owner>/<repo>` を1行ずつ記載（空行と `#` / `;` 行は無視）
+3. `repository.ini` の `[repositories]` に、今回 clone / 一括運用する `<owner>/<repo>` を1行ずつ記載（空行と `#` / `;` 行は無視）
+   - section なしの既存 `<owner>/<repo>` 行も後方互換として active repo 扱いにする
+   - `[rally.teams]` は関連 repo group 用で、clone / pull / deps 系 recipe の対象にはしない
 4. `just clone` で `./target-repos/<repo>.git` に bare clone し、`./target-repos/<repo>.git/.wt/main` を作る
    - `.wt/main` は default branch の baseline checkout として固定する
    - `.wt/main` で branch を切ったり tracked file を変更したりしない
@@ -111,6 +113,10 @@ monorepo ではありません。
    - `ral install` は `~/.agents/skills/ral/` と `~/.codex/config.toml` を更新する
    - `just rally-status` / `just rally-skills` / `just rally-join <team> <agent>` で利用状態と skill 文面を確認する
    - `just rally-inbox <team> <agent>` / `just rally-send <team> <from> <to> "<message>"` で連絡する
+   - 関連 repo group は `repository.ini` の `[rally.teams]` に `papyr = papyr.mbt, papyr-docs.mbt, blog.mbt` の形で定義する
+   - group team 名は `repo-group-<group>`、agent 名は repo basename、親 thread は `moonrepo`
+   - `just rally-groups` / `just rally-group <group>` / `just rally-group-join <group>` / `just rally-group-inbox <group> <agent>` / `just rally-group-send <group> <from> <to|all> "<message>"` を使う
+   - 上流追従や downstream 共有の changelog は `just rally-changelog <group> <source-repo> <slug> "<summary>"` で `docs/rally/<group>/` に残し、`ral` が使える場合だけ通知する
    - `ral` は task state の正ではない。task state は `.codex/tasks/*.json`、git、GitHub を正とする
 
 ## Codex sub agent 運用
@@ -126,6 +132,7 @@ monorepo ではありません。
 - `just refactor <repo>` は MoonBit refactoring 専用の軽量入口として残すが、通常の repo 実装作業は `codex-start` を優先する
 - document 改善は `docs-review` を入口にし、worker は moonrepo workspace 上の `docs-humanizer` skill を使って対象 worktree を編集する
 - 複数 agent を併用する場合、`ral` は短い依頼・完了通知・ブロッカー共有にだけ使う。実装指示、レビュー結果、PR 状態は manifest と GitHub に残す
+- 関連 repo group の changelog は追従メモであり、実装完了や review 判断の正にはしない
 
 ## 一括実行コマンド
 
@@ -148,5 +155,12 @@ monorepo ではありません。
   - `just push-all`
   - `just gh-runs-last-all`
   - `just gh-runs-rerun-failed-all`
+  - `just rally-groups`
+  - `just rally-group <group>`
+  - `just rally-group-validate`
+  - `just rally-group-join <group>`
+  - `just rally-group-inbox <group> <agent>`
+  - `just rally-group-send <group> <from> <to|all> "<message>"`
+  - `just rally-changelog <group> <source-repo> <slug> "<summary>"`
   - failed workflow の rerun は dry-run 既定
   - `target-repos/` 全削除は `just --set FORCE 1 clean` / `just --set FORCE 1 cclone`

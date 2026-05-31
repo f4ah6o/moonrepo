@@ -2,5 +2,12 @@
 ; 生成コマンド: just init <owner> --topics moonbit rust
 ; --topics 未指定時は moonbit rust を使う
 ; 初期生成時はすべてコメントアウトされるので、今回 clone / 一括運用する対象だけ有効化する
+
+[repositories]
 ; 例:
 ; moonbitlang/core
+
+[rally.teams]
+; 関連の強い target repo 群を ral team として扱う
+; papyr = papyr.mbt, papyr-docs.mbt, blog.mbt
+; mhx = mhx.mbt, mhx_spec.mbt

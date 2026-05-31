@@ -69,11 +69,16 @@ init owner *args:
       echo "; 生成コマンド: just init $owner --topics $topics"; \
       echo "; 初期生成時はすべてコメントアウトされるので、今回 clone / 一括運用する対象だけ有効化する"; \
       echo "; topic に一致した repo をコメントアウトで出力する"; \
+      echo ""; \
+      echo "[repositories]"; \
       echo "; 例:"; \
       while IFS= read -r name; do \
         [[ -z "$name" ]] && continue; \
         echo "; $owner/$name"; \
       done < "$tmp"; \
+      echo ""; \
+      echo "[rally.teams]"; \
+      echo "; papyr = papyr.mbt, papyr-docs.mbt, blog.mbt"; \
     } > "{{REPO_LIST}}"; \
     rm -f "$tmp"; \
       echo "generated {{REPO_LIST}} from $owner (topics: $topics)"' -- "{{owner}}" {{args}}
@@ -1019,6 +1024,31 @@ rally-mode mode:
     script="$HOME/.agents/skills/ral/scripts/delivery.sh"; \
     [[ -x "$script" ]] || { echo "missing ral wrapper; run: just rally-install" >&2; exit 1; }; \
     "$script" set "{{mode}}" codex "$(pwd)"'
+
+# List configured related-repo ral groups from repository.ini.
+rally-groups:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/rally-groups.sh list
+
+# Show one configured related-repo ral group.
+rally-group group:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/rally-groups.sh show "{{group}}"
+
+# Validate related-repo ral group members have main worktrees.
+rally-group-validate:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/rally-groups.sh validate
+
+# Join moonrepo and each related repo basename agent to a ral group team.
+rally-group-join group:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/rally-groups.sh join "{{group}}"
+
+rally-group-inbox group agent:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/rally-groups.sh inbox "{{group}}" "{{agent}}"
+
+rally-group-send group from to message:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/rally-groups.sh send "{{group}}" "{{from}}" "{{to}}" "{{message}}"
+
+rally-changelog group source-repo slug summary:
+  @REPO_LIST="{{REPO_LIST}}" REPOS_DIR="{{REPOS_DIR}}" bash scripts/rally-groups.sh changelog "{{group}}" "{{source-repo}}" "{{slug}}" "{{summary}}"
 
 # Migrate GitHub Issues to local issues/ directory in a dedicated worktree for a single repo
 # Example: just issues-migrate mhx.mbt issues-migration
