@@ -68,6 +68,8 @@ just codex-pr <repo> <task-slug>
 
 ドキュメント専用の review では、repo local skill `docs-humanizer` を使います。Zenn の anti-AI-writing 記事をもとに、日本語の repository docs 向けチェックリストと audit script を入れています。
 
+MoonBit target repo の implementation / review で `opencode-review-loop` を使う場合は、opencode の implement / review prompt に `moonbit-agent-guide` を使うことを明記します。MoonBit API、package 構造、refactor、公開面の整理を含む場合は `moonbit-refactoring` も併用します。review は guard script 経由で exact `LGTM` まで回し、変更範囲に応じて `moon check`、`moon test`、必要なら `moon info` / `moon test --target all` を通します。
+
 ## 使い方
 
 1. `repository.ini` を初期生成
@@ -252,6 +254,10 @@ just rally-changelog papyr papyr.mbt content-bridge "content bridge downstream f
   - `just refactor <repo>`
   - 対象 repo の clean 状態、moon モジュール認識、skill インストール済みを検証し、ブランチ作成と skill 起動の手順を出力します。
   - 将来的には `just codex-start <repo> <task-slug>` ベースの入口へ寄せる前提ですが、現状は MoonBit refactoring 専用の軽量フローとして残します。
+- MoonBit repo の opencode review loop
+  - `opencode-review-loop` を使う場合も `moonbit-agent-guide` を併用します。
+  - API / package / refactor を含む作業では `moonbit-refactoring` も併用します。
+  - opencode prompt には MoonBit skill 利用、unrelated changes を戻さないこと、検証コマンド、exact `LGTM` 条件を明記します。
 - document audit / improvement
   - `just docs-audit <repo>`
   - `just docs-audit-all`

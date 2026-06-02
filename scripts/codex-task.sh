@@ -120,6 +120,8 @@ agent:    codex worker
 codex parent-thread prompt:
   Spawn exactly one worker sub agent for $worktree_path.
   The worker owns all edits inside that worktree and does the repository implementation work.
+  If the target repo is a MoonBit repo, the worker must use moonbit-agent-guide before implementation; if the task changes MoonBit APIs, package structure, or refactors code, also use moonbit-refactoring.
+  When running an opencode-review-loop for MoonBit work, include the same MoonBit skill requirement in the opencode implementation/review prompts and require review until exact LGTM.
   The parent thread must stay in moonrepo, perform orchestration only, then review, verify, push, and open the PR after the worker finishes.
   If ral is installed, use it only for short parent/reviewer messages; keep task state in this manifest, git, and GitHub.
 EOF

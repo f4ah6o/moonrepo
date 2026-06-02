@@ -91,23 +91,29 @@ monorepo ではありません。
    - `just refactor <repo>` で環境検証と次手順の出力
    - 出力に従って `refactor/<date>` ブランチを切り、codex/claude で skill を起動
    - skill が指示する順序（architecture -> API 棚卸し -> 最小差分 -> tests/docs -> `moon check`/`moon test`）で進める
-15. Document の監査・改善（`docs-humanizer` skill 経由）
+15. MoonBit repo の opencode review loop
+   - MoonBit target repo の実装・レビューで `opencode-review-loop` を使う場合は、必ず `moonbit-agent-guide` を併用する
+   - MoonBit API、package 構造、refactor、公開面の整理を含む場合は `moonbit-refactoring` も併用する
+   - opencode の implement / review prompt には「MoonBit 関連 skill を使うこと」と、対象 worktree の unrelated changes を戻さないことを明記する
+   - review は `opencode-review-loop` の guard script を使い、actionable findings への対応と検証を繰り返し、exact `LGTM` まで回す
+   - 検証は変更範囲に応じて `moon check`、`moon test`、必要なら `moon info` / `moon test --target all` を使う
+16. Document の監査・改善（`docs-humanizer` skill 経由）
    - `just docs-audit <repo>` で tracked documents を機械監査する
    - `just docs-audit-all` で全 active repo を一括監査する
    - `just docs-review <repo> <task-slug>` で codex worktree を作り、`docs-humanizer` skill を使う worker 向け手順を出力する
    - 対象は `README*`, `AGENTS.md`, `CLAUDE.md`, `docs/**/*.md`, `issues/**/*.md` を含む tracked `.md` / `.mdx` / `.txt` / `.rst` / `.adoc`
    - audit は機械検査で拾える AI っぽい文体だけを報告する。最終判断は skill のチェックリストに沿って行う
-16. `cgz` を開発補助に使う（`cgz-workflow` skill 経由）
+17. `cgz` を開発補助に使う（`cgz-workflow` skill 経由）
    - `cgz` はインストール済み CLI として扱う。moonrepo は `codegraph` repo を clone 対象として管理しない
    - read-only helper: `just cgz-status <path>` / `just cgz-context <path> <task>` / `just cgz-affected <path> <files...>`
    - helper は `.codegraph/` を初期化・更新しない。必要な場合だけ対象 repo で明示的に `cgz init -i <path>` / `cgz index <path>` を実行する
    - `cgz` の変更希望は `../codegraph/issues/` にローカル issue として作成する
-17. `dwiki` で低トークンな repo 概要調査を行う（`dwiki-workflow` skill 経由）
+18. `dwiki` で低トークンな repo 概要調査を行う（`dwiki-workflow` skill 経由）
    - `dwiki` は任意のインストール済み CLI として扱う。`just doctor` の必須前提には含めない
    - 使う前に `command -v dwiki` と `dwiki check <owner>/<repo> --output json` で利用可否を確認する
    - `dwiki read/ask/search ... --output json | jq -r .result` で必要部分だけ読む
    - `dwiki` の出力は調査の入口として扱い、実装や結論の前に local file で確認する
-18. `ral` で agent 間の短い連絡を行う
+19. `ral` で agent 間の短い連絡を行う
    - `ral` は任意 helper として扱う。`just doctor` の必須前提には含めない
    - `just rally-install` は `ral skills` を含む `github.com/f4ah6o/rally-rs` の確認済み revision を install する
    - `ral install` は `~/.agents/skills/ral/` と `~/.codex/config.toml` を更新する
@@ -130,6 +136,7 @@ monorepo ではありません。
 - 並列 worktree を増やす前や PR 整理前は `just codex-health` で stale manifest、missing worktree、branch / PR 状態ずれ、active task 同士の changed path 重複を確認する
 - `AGENTS.md` や skill だけで sub agent 利用を絶対証明することはできない。実効強制は moonrepo の入口 command を通した運用で担保する
 - `just refactor <repo>` は MoonBit refactoring 専用の軽量入口として残すが、通常の repo 実装作業は `codex-start` を優先する
+- MoonBit repo の worker は `moonbit-agent-guide` を読む。API 整理・package 分割・refactor では `moonbit-refactoring` も読む。`opencode-review-loop` を併用する場合も opencode prompt に同じ skill 指示を含める
 - document 改善は `docs-review` を入口にし、worker は moonrepo workspace 上の `docs-humanizer` skill を使って対象 worktree を編集する
 - 複数 agent を併用する場合、`ral` は短い依頼・完了通知・ブロッカー共有にだけ使う。実装指示、レビュー結果、PR 状態は manifest と GitHub に残す
 - 関連 repo group の changelog は追従メモであり、実装完了や review 判断の正にはしない
